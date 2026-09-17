@@ -7,6 +7,7 @@
 #include "ui/LookAndFeel.h"
 #include "ui/Panels.h"
 #include "ui/Scope.h"
+#include "ui/ChordPage.h"
 #include "ui/ScopePage.h"
 #include "ui/WavetableEditor.h"
 #include "ui/ai/AiPage.h"
@@ -69,6 +70,7 @@ private:
     ModPage modPage;
     ui::FxPage fxPage;
     ui::ScopePage scopePage;
+    ui::ChordPage chordPage;
     ui::AiPage aiPage;
 
     // The wavetable editor replaces the tabs while open (the OSC page's GL

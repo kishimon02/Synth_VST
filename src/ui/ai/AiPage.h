@@ -24,6 +24,9 @@ public:
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 
+    // Puts a request into the input box without sending it (used by the chord page).
+    void setRequestText (const juce::String& text);
+
 private:
     //==========================================================================
     class InputEditor final : public juce::TextEditor

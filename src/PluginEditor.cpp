@@ -66,6 +66,7 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
       global (p.getAPVTS()),
       oscPage (p), modPage (p), fxPage (p.getAPVTS()),
       scopePage (p.getScopeBuffer(), [&p] { return p.getCurrentSampleRate(); }),
+      chordPage (p),
       aiPage (p),
       scope (p.getScopeBuffer()),
       keyboard (p.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard)
@@ -105,10 +106,17 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     tabs.addTab ("MOD", ui::colours::background, &modPage, false);
     tabs.addTab ("FX",  ui::colours::background, &fxPage,  false);
     tabs.addTab ("SCOPE", ui::colours::background, &scopePage, false);
+    tabs.addTab ("CHORD", ui::colours::background, &chordPage, false);
     tabs.addTab ("AI", ui::colours::background, &aiPage, false);
     tabs.setTabBarDepth (30);
     tabs.setOutline (0);
     addAndMakeVisible (tabs);
+
+    chordPage.onSendToAi = [this] (const juce::String& text)
+    {
+        tabs.setCurrentTabIndex (tabs.getNumTabs() - 1);   // the AI tab
+        aiPage.setRequestText (text);
+    };
 
     oscPage.oscA.onEdit = [this] (int osc) { openWaveEditor (osc); };
     oscPage.oscB.onEdit = [this] (int osc) { openWaveEditor (osc); };

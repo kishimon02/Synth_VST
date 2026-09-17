@@ -65,6 +65,7 @@ set(WAVEFORGE_AI_SOURCES
     src/ai/LlmClient.cpp
     src/ai/ParamCatalog.cpp
     src/ai/RequestPresets.cpp
+    src/ai/ChordLibrary.cpp
     src/ai/MusicContext.cpp
     src/ai/MidiExport.cpp
     src/ai/ReplyFormat.cpp
@@ -88,6 +89,7 @@ target_sources(WaveForge PRIVATE
     src/ui/LineStack3DView.cpp
     src/ui/Wavetable3DView.cpp
     src/ui/WavetableEditor.cpp
+    src/ui/ChordPage.cpp
     src/ui/ai/SettingsDialog.cpp
     src/ui/ai/AiPage.cpp
     src/ai/Assistant.cpp

@@ -21,6 +21,7 @@
 #include "ai/LlmClient.h"
 #include "ai/ParamCatalog.h"
 #include "ai/RequestPresets.h"
+#include "ai/ChordLibrary.h"
 #include "ai/MusicContext.h"
 #include "ai/MidiExport.h"
 #include "ai/ReplyFormat.h"
@@ -989,10 +990,10 @@ struct AiTest final : public juce::UnitTest
 
             std::vector<float> frames;
             int numFrames = 0;
-            juce::String name;
-            expect (ai::ReplyFormat::wavetableFrames (m.wavetable, frames, numFrames, name), "wavetable synthesised");
+            juce::String tableName;
+            expect (ai::ReplyFormat::wavetableFrames (m.wavetable, frames, numFrames, tableName), "wavetable synthesised");
             expectEquals (numFrames, ai::ReplyFormat::wavetableTargetFrames, "expanded to the target frame count");
-            expectEquals (name, juce::String ("Glassy"));
+            expectEquals (tableName, juce::String ("Glassy"));
             float peak = 0.0f; bool finite = true;
             for (float v : frames) { peak = juce::jmax (peak, std::abs (v)); finite = finite && std::isfinite (v); }
             expect (finite && peak <= 1.0001f && peak > 0.5f, "frames finite and normalised");
@@ -1127,6 +1128,183 @@ struct PresetTest final : public juce::UnitTest
     }
 };
 
+//==============================================================================
+// Chord progression library: roman numerals, keys and the rendered voicing.
+class ChordLibraryTest final : public juce::UnitTest
+{
+public:
+    ChordLibraryTest() : juce::UnitTest ("Chord library / degrees, keys and voicing") {}
+
+    void runTest() override
+    {
+        using CL = ai::ChordLibrary;
+
+        beginTest ("keys: 24 entries, C major first, spelling follows the key");
+        {
+            const auto keys = CL::keyNames();
+            expectEquals (keys.size(), 24, "24 keys");
+            expectEquals (keys[0], juce::String ("C major"));
+            expectEquals (keys[1], juce::String ("C minor"));
+            expect (! CL::keyIsMinor (0) && CL::keyIsMinor (1), "mode alternates");
+            expectEquals (CL::keyRoot (CL::keyIndexFor (9, true)), 9, "A minor root");
+            expectEquals (keys[CL::keyIndexFor (10, false)], juce::String ("Bb major"), "flat key spelling");
+            expectEquals (keys[CL::keyIndexFor (1, true)], juce::String ("C# minor"), "sharp key spelling");
+        }
+
+        beginTest ("degrees: roman numerals resolve per mode");
+        {
+            std::vector<ai::ChordSymbol> chords;
+            juce::String error;
+            expect (CL::parse ("I IV V", false, chords, error), error);
+            expectEquals ((int) chords.size(), 3);
+            expectEquals (CL::chordNames (chords, 0), juce::String ("C - F - G"), "in C major");
+
+            const int aMinor = CL::keyIndexFor (9, true);
+            expect (CL::parse ("i iv V", true, chords, error), error);
+            expectEquals (CL::chordNames (chords, aMinor), juce::String ("Am - Dm - E"), "in A minor");
+
+            expect (CL::parse ("bVII", false, chords, error), error);
+            expectEquals (chords[0].rootSemitone, 10, "bVII is a whole tone below the tonic");
+        }
+
+        beginTest ("degrees: qualities, slash bass and per-chord beats");
+        {
+            std::vector<ai::ChordSymbol> chords;
+            juce::String error;
+            expect (CL::parse ("V7 iim7b5 IVM7 Isus4", false, chords, error), error);
+            expect (chords[0].intervals == std::vector<int> ({ 0, 4, 7, 10 }), "V7 is a dominant seventh");
+            expect (chords[1].intervals == std::vector<int> ({ 0, 3, 6, 10 }), "iim7b5 is half diminished");
+            expect (chords[2].intervals == std::vector<int> ({ 0, 4, 7, 11 }), "IVM7 is a major seventh");
+            expect (chords[3].intervals == std::vector<int> ({ 0, 5, 7 }), "sus4");
+            expectEquals (CL::chordNames (chords, 0), juce::String ("G7 - Dm7b5 - FM7 - Csus4"));
+
+            expect (CL::parse ("IV/V", false, chords, error), error);
+            expectEquals (chords[0].rootSemitone, 5);
+            expectEquals (chords[0].bassSemitone, 7);
+            expectEquals (CL::chordName (chords[0], 0), juce::String ("F/G"));
+
+            expect (CL::parse ("I:2 IV:2", false, chords, error), error);
+            expectWithinAbsoluteError (CL::totalBeats (chords, 1), 4.0f, 0.001f, "two half-bar chords");
+            expectWithinAbsoluteError (CL::totalBeats (chords, 4), 16.0f, 0.001f, "repeats");
+        }
+
+        beginTest ("degrees: bad input is reported, not guessed");
+        {
+            std::vector<ai::ChordSymbol> chords;
+            juce::String error;
+            expect (! CL::parse ("Z7", false, chords, error), "unknown numeral");
+            expect (error.isNotEmpty(), "an error message");
+            expect (! CL::parse ("Ifoo", false, chords, error), "unknown quality");
+            expect (! CL::parse ("   ", false, chords, error), "empty");
+        }
+
+        beginTest ("render: notes follow the key, the octave and the bass option");
+        {
+            std::vector<ai::ChordSymbol> chords;
+            juce::String error;
+            expect (CL::parse ("I IV V I", false, chords, error), error);
+
+            ai::ChordLibrary::Options opt;
+            opt.keyIndex = 0;          // C major
+            opt.octave = 4;
+            opt.bassNote = true;
+            auto notes = CL::render (chords, opt);
+            expectEquals ((int) notes.size(), 16, "four triads plus a bass note each");
+
+            int lowest = 127;
+            for (const auto& n : notes)
+            {
+                expect (n.pitch >= 24 && n.pitch <= 108, "pitch in range");
+                expect (n.velocity > 0 && n.velocity <= 127, "velocity in range");
+                lowest = juce::jmin (lowest, n.pitch);
+            }
+            expectEquals (lowest % 12, 0, "the lowest note of I ... is the tonic C");
+            expectWithinAbsoluteError (notes[0].startBeat, 0.0f, 0.001f);
+            expect (notes.back().startBeat > 11.0f, "the last chord starts in bar four");
+
+            opt.bassNote = false;
+            expectEquals ((int) CL::render (chords, opt).size(), 12, "triads only");
+            opt.repeats = 2;
+            expectEquals ((int) CL::render (chords, opt).size(), 24, "twice through");
+            expectWithinAbsoluteError (CL::totalBeats (chords, 2), 32.0f, 0.001f);
+
+            // transposing the key moves every note by the same interval
+            opt.repeats = 1;
+            auto inC = CL::render (chords, opt);
+            opt.keyIndex = CL::keyIndexFor (2, false);   // D major
+            auto inD = CL::render (chords, opt);
+            expectEquals ((int) inD.size(), (int) inC.size());
+            for (size_t i = 0; i < inC.size(); ++i)
+                expectEquals ((inD[i].pitch - inC[i].pitch + 120) % 12, 2, "everything is two semitones up");
+        }
+
+        beginTest ("render: chords are voice led, not jumped");
+        {
+            std::vector<ai::ChordSymbol> chords;
+            juce::String error;
+            expect (CL::parse ("I V vi iii IV I IV V", false, chords, error), error);
+            ai::ChordLibrary::Options opt;
+            opt.bassNote = false;
+            auto notes = CL::render (chords, opt);
+
+            std::vector<float> centres (chords.size(), 0.0f);
+            std::vector<int> counts (chords.size(), 0);
+            for (const auto& n : notes)
+            {
+                const int chord = juce::jlimit (0, (int) chords.size() - 1, (int) (n.startBeat / 4.0f));
+                centres[(size_t) chord] += (float) n.pitch;
+                counts[(size_t) chord]++;
+            }
+            for (size_t i = 0; i < centres.size(); ++i)
+                centres[i] /= (float) juce::jmax (1, counts[i]);
+            for (size_t i = 1; i < centres.size(); ++i)
+                expect (std::abs (centres[i] - centres[i - 1]) < 6.0f,
+                        "chord " + juce::String ((int) i) + " stays near the previous voicing");
+        }
+
+        beginTest ("library: every built-in parses and every category works in both modes");
+        {
+            expect (CL::builtins().size() >= 50, "a useful number of progressions");
+            for (const auto& p : CL::builtins())
+            {
+                expect (p.name.isNotEmpty() && p.category.isNotEmpty(), "named and filed");
+                std::vector<ai::ChordSymbol> chords;
+                juce::String error;
+                const bool minorMode = p.mode == ai::ChordProgression::minor;
+                expect (CL::parse (p.degrees, minorMode, chords, error), p.name + ": " + error);
+                expect (! chords.empty() && chords.size() <= 32, p.name + ": chord count");
+                expect (! CL::render (chords, {}).empty(), p.name + ": renders notes");
+            }
+            for (const auto& cat : CL::categories())
+            {
+                expect (! CL::forCategory (cat, false).empty(), cat + " has a major-key progression");
+                expect (! CL::forCategory (cat, true).empty(), cat + " has a minor-key progression");
+            }
+        }
+
+        beginTest ("library: a user progression survives a JSON round trip");
+        {
+            ai::ChordProgression p;
+            p.category = "User";
+            p.name = "My loop";
+            p.degrees = "IM7 vim7 iim7 V7";
+            p.mode = ai::ChordProgression::minor;
+            p.builtin = false;
+
+            ai::ChordProgression back;
+            expect (ai::ChordProgression::fromVar (p.toVar(), back), "parses back");
+            expectEquals (back.name, p.name);
+            expectEquals (back.category, p.category);
+            expectEquals (back.degrees, p.degrees);
+            expect (back.mode == ai::ChordProgression::minor, "mode survives");
+            expect (! back.builtin, "loaded progressions are user ones");
+
+            ai::ChordProgression bad;
+            expect (! ai::ChordProgression::fromVar (juce::var(), bad), "an empty object is rejected");
+        }
+    }
+};
+
 struct StdoutRunner final : public juce::UnitTestRunner
 {
     void logMessage (const juce::String& m) override { std::cout << m << std::endl; }
@@ -1143,6 +1321,7 @@ static WaveEditTest waveEditTest;
 static WarpTest warpTest;
 static ArpeggiatorTest arpeggiatorTest;
 static AiTest aiTest;
+static ChordLibraryTest chordLibraryTest;
 static PresetTest presetTest;
 
 int main()

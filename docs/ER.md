@@ -304,6 +304,7 @@ erDiagram
 | MIDI_EXPORT | `ai::MidiExport` (Type 1、テンポ・拍子付き、ドラムは ch10) | `%TEMP%\WaveForge\*.mid` |
 | (追加) REQUEST_PRESET | `ai::RequestPreset` (category, name, text) | 内蔵 + `%APPDATA%\WaveForge\RequestPresets.json` |
 | (追加) ARP_PATTERN_FILE | `wf::ArpPattern` JSON | `%APPDATA%\WaveForge\ArpPatterns\*.json` |
+| (追加) CHORD_PROGRESSION | `ai::ChordProgression` (category, name, degrees, mode) → `ai::ChordSymbol` → `ai::Note` | 内蔵 + `%APPDATA%\WaveForge\ChordProgressions.json` |
 
 ```mermaid
 erDiagram
@@ -318,6 +319,9 @@ erDiagram
     SUGGESTION_REQUEST ||--o| SUGGESTION : "result"
     SUGGESTION ||--|{ SUGGESTED_NOTE : "contains"
     SUGGESTION ||--o| MIDI_EXPORT : "rendered to"
+    CHORD_PROGRESSION ||--|{ CHORD_SYMBOL : "degrees"
+    CHORD_PROGRESSION ||--o| MIDI_EXPORT : "rendered to"
+    CHORD_PROGRESSION }o--|| KEY : "played in"
 
     APP_SETTINGS {
         string active_provider FK

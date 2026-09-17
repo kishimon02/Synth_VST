@@ -1,5 +1,6 @@
 #include "AiPage.h"
 #include "SettingsDialog.h"
+#include "../PianoRoll.h"
 
 namespace ui
 {
@@ -8,24 +9,6 @@ namespace
 {
     juce::String jp (const char* utf8) { return juce::String (juce::CharPointer_UTF8 (utf8)); }
 
-    const char* gmName (int note)
-    {
-        switch (note)
-        {
-            case 35: case 36: return "Kick";
-            case 37: return "Rim";  case 38: case 40: return "Snare"; case 39: return "Clap";
-            case 42: return "CHH";  case 44: return "PHH"; case 46: return "OHH";
-            case 41: case 43: case 45: case 47: case 48: case 50: return "Tom";
-            case 49: case 57: return "Crash"; case 51: case 59: return "Ride"; case 53: return "Bell";
-            default: return nullptr;
-        }
-    }
-
-    juce::String noteName (int note)
-    {
-        static const char* names[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-        return juce::String (names[note % 12]) + juce::String (note / 12 - 1);
-    }
 }
 
 //==============================================================================
@@ -175,6 +158,11 @@ void AiPage::refreshAll()
         lastHistorySize = history.size();
         chatViewport.setViewPosition (0, juce::jmax (0, chatList.getHeight() - chatViewport.getViewHeight()));
     }
+}
+
+void AiPage::setRequestText (const juce::String& text)
+{
+    insertRequest (text);
 }
 
 void AiPage::insertRequest (const juce::String& text)
@@ -577,66 +565,13 @@ void AiPage::NotesCard::resized()
 void AiPage::NotesCard::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().withTrimmedBottom (28.0f);
-    g.setColour (colours::widget);
-    g.fillRoundedRectangle (r, 6.0f);
-    auto plot = r.reduced (6.0f, 4.0f).withTrimmedLeft (36.0f);
-
-    const auto& notes = message.notes;
-    int lo = 127, hi = 0;
-    float endBeat = 1.0f;
-    for (const auto& n : notes)
-    {
-        lo = juce::jmin (lo, n.pitch); hi = juce::jmax (hi, n.pitch);
-        endBeat = juce::jmax (endBeat, n.startBeat + n.durationBeats);
-    }
-    const int beatsPerBar = page.assistant.context().timeSigNumerator;
-    const float bars = std::ceil (endBeat / (float) beatsPerBar);
-    const float totalBeats = bars * (float) beatsPerBar;
-    lo = juce::jmax (0, lo - 1); hi = juce::jmin (127, hi + 1);
-    const float rowH = plot.getHeight() / (float) (hi - lo + 1);
-
-    g.setColour (colours::panelEdge);
-    for (int b = 0; b <= (int) totalBeats; ++b)
-    {
-        const float x = plot.getX() + plot.getWidth() * (float) b / totalBeats;
-        g.setColour (b % beatsPerBar == 0 ? colours::textDim : colours::panelEdge);
-        g.drawVerticalLine ((int) x, plot.getY(), plot.getBottom());
-    }
-    g.setFont (juce::FontOptions (9.5f));
-    for (int pitch = lo; pitch <= hi; ++pitch)
-    {
-        const float y = plot.getBottom() - rowH * (float) (pitch - lo + 1);
-        if (message.isDrums())
-        {
-            if (auto* name = gmName (pitch))
-            {
-                g.setColour (colours::textDim);
-                g.drawText (name, (int) r.getX() + 4, (int) y, 34, (int) rowH + 1, juce::Justification::centredLeft);
-            }
-        }
-        else if (pitch % 12 == 0)
-        {
-            g.setColour (colours::textDim);
-            g.drawText (noteName (pitch), (int) r.getX() + 4, (int) y, 34, (int) rowH + 1, juce::Justification::centredLeft);
-            g.setColour (colours::panelEdge);
-            g.drawHorizontalLine ((int) (y + rowH), plot.getX(), plot.getRight());
-        }
-    }
-    const auto colour = message.isDrums() ? colours::accentB : colours::accentFx;
-    for (const auto& n : notes)
-    {
-        const float x = plot.getX() + plot.getWidth() * n.startBeat / totalBeats;
-        const float w = juce::jmax (2.0f, plot.getWidth() * n.durationBeats / totalBeats - 1.0f);
-        const float y = plot.getBottom() - rowH * (float) (n.pitch - lo + 1);
-        g.setColour (colour.withAlpha (0.45f + 0.55f * (float) n.velocity / 127.0f));
-        g.fillRoundedRectangle (x, y + 1.0f, w, juce::jmax (2.0f, rowH - 2.0f), 2.0f);
-    }
+    const int bars = drawPianoRoll (g, r, message.notes, page.assistant.context().timeSigNumerator,
+                                    message.isDrums(), message.isDrums() ? colours::accentB : colours::accentFx);
     g.setColour (colours::textDim);
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (message.notesKind.toUpperCase() + "   " + juce::String (notes.size()) + " notes   " + juce::String ((int) bars) + " bars",
+    g.drawText (message.notesKind.toUpperCase() + "   " + juce::String (message.notes.size()) + " notes   "
+                    + juce::String (bars) + " bars",
                 r.reduced (8.0f, 3.0f).toNearestInt(), juce::Justification::topRight);
-    g.setColour (colours::panelEdge);
-    g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
 }
 
 //==============================================================================
