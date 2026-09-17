@@ -1085,6 +1085,21 @@ struct PresetTest final : public juce::UnitTest
             expectEquals (fxParamsInLayout, ids.size(), "ParamID::Fx::all() lists every fx_ parameter");
         }
 
+        beginTest ("every factory preset has a category, and the categories cover them all");
+        {
+            const auto categories = PresetManager::categories();
+            expect (categories.size() >= 8, "a useful number of categories");
+            int filed = 0;
+            for (const auto& preset : PresetManager::factoryPresets())
+            {
+                expect (preset.category.isNotEmpty(), preset.name + " has a category");
+                expect (categories.contains (preset.category), preset.name + ": category is listed");
+                filed += categories.contains (preset.category) ? 1 : 0;
+            }
+            expectEquals (filed, (int) PresetManager::factoryPresets().size());
+            expect (PresetManager::factoryPresets().size() >= 40, "a useful number of presets");
+        }
+
         beginTest ("applying a preset changes parameters, and Init restores the defaults");
         const auto* supersaw = PresetManager::findFactory ("Supersaw Lead");
         expect (supersaw != nullptr);
@@ -1097,7 +1112,7 @@ struct PresetTest final : public juce::UnitTest
         const float masterDefault = master->getNormalisableRange().convertFrom0to1 (master->getDefaultValue());
         logMessage ("defaults: unison=" + juce::String (unisonDefault, 2)
                     + " master=" + juce::String (masterDefault, 2) + " dB");
-        expectWithinAbsoluteError (masterDefault, -6.0f, 0.01f, "master volume default");
+        expectWithinAbsoluteError (masterDefault, 0.0f, 0.01f, "master volume default");
 
         PresetManager::applyFactory (apvts, *supersaw);
         expectWithinAbsoluteError (unison->getNormalisableRange().convertFrom0to1 (unison->getValue()),

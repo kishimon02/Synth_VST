@@ -19,6 +19,7 @@ public:
 
     struct FactoryPreset
     {
+        juce::String category;                                     // genre grouping in the preset menu
         juce::String name;
         juce::String tableA, tableB;                               // wavetable sourceIds
         std::vector<std::pair<juce::String, float>> values;        // parameter id -> value in its own units
@@ -28,6 +29,7 @@ public:
     static juce::Array<juce::File> userPresets();
 
     static const std::vector<FactoryPreset>& factoryPresets();
+    static juce::StringArray categories();                         // in menu order
     static const FactoryPreset* findFactory (const juce::String& name);
 
     // Sets every parameter back to its default. Used before applying a preset

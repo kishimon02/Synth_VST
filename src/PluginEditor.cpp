@@ -164,9 +164,13 @@ void WaveForgeEditor::refreshPresetMenu()
 {
     presetBox.clear (juce::dontSendNotification);
     int id = 1;
-    presetBox.addSectionHeading ("Factory");
-    for (const auto& p : PresetManager::factoryPresets())
-        presetBox.addItem (p.name, id++);
+    for (const auto& category : PresetManager::categories())
+    {
+        presetBox.addSectionHeading (category);
+        for (const auto& p : PresetManager::factoryPresets())
+            if (p.category == category)
+                presetBox.addItem (p.name, id++);
+    }
 
     const auto current = processor.getCurrentPresetName();
     for (int i = 0; i < presetBox.getNumItems(); ++i)

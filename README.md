@@ -67,13 +67,29 @@ FX (ディレイのサンプル精度とフィードバック、EQ の利得、�
 AI (パラメータカタログと変更の適用、キー推定、.mid 書き出しの往復、応答 JSON の解釈、リクエスト本文の形、DPAPI)、
 コード進行 (度数の解釈、キーと転調、ボイシングとボイスリーディング、内蔵 71 種の妥当性)、
 会話履歴 (メッセージの JSON 往復、セッションの保存/読込、新しい順の一覧、30 日での削除)、
-プリセットのパラメータ ID 妥当性と保存/読込、エンジン全体のレンダリング (有限・不連続なし・解放後に無音) を検証する。
+プリセットのパラメータ ID 妥当性・カテゴリ・保存/読込、エンジン全体のレンダリング (有限・不連続なし・解放後に無音) を検証する。
 
 ## プリセット
 
-- ファクトリー: Init / Supersaw Lead / Soft Pad / Wobble Bass / Glass Bell / Pluck Echo (コード内で定義、インストール不要)
+- ファクトリー: 44 種をジャンル別に用意 (コード内で定義、インストール不要)。画面上部の Preset を開くと
+  カテゴリ見出しごとに並ぶ:
+  - **Basic**: Init / Raw Saw / Raw Square / Pure Sine
+  - **EDM / Dance**: Supersaw Lead / Festival Pluck / Big Room Stab / Hoover Lead / Sidechain Pad / Trance Gate
+  - **Techno / House**: Acid Bass / House Stab / Rolling Bass / Dub Chord
+  - **Bass Music**: Wobble Bass / Reese Bass / Neuro Growl / Sub Drop
+  - **Hip-Hop / Trap**: 808 Sub / Trap Bell / Dark Pluck / Detuned Lead
+  - **Lo-Fi / Chill**: Lo-fi Keys / Tape Pad / Dusty Bell / Soft Wurli
+  - **Pop**: Pluck Echo / Poly Stack / Vocal Pad / Bell Lead
+  - **Synthwave / 80s**: Retro Brass / Neon Lead / Analog Pad / PWM Strings
+  - **Rock**: Power Fifths / Organ Stab / Fuzz Lead
+  - **Jazz / Soul**: E-Piano / Vibraphone / Soft Clav
+  - **Cinematic / Ambient**: Glass Bell / Cinematic Pad / Dark Drone / Ambient Shimmer / Choir Pad
+  - **Chiptune / Game**: Square Lead / PWM Arp / Game Bass / Noise Perc
+  - **Experimental**: Ring Mod Lead / Random Bleeps
+  Trance Gate / PWM Arp / Random Bleeps はアルペジエーターも一緒に設定する
 - ユーザー: 画面上部の「Save As...」で `%APPDATA%\WaveForge\Presets\*.wfpreset` に保存、「Load...」で読込
 - ソング保存時の状態と同じ内容を書き出すので、プリセットとソングで設定が食い違わない
+- Master Volume の初期値は 0 dB。音が濃いプリセットは各自で -5〜-10 dB を持っている
 
 ## 現在の状態
 

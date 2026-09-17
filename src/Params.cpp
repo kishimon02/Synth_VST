@@ -65,7 +65,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
     Layout layout;
 
     // ---- GLOBAL
-    layout.add (flt (ParamID::masterVolume, "Master Volume", Range (-60.0f, 6.0f, 0.1f), -6.0f, "dB"));
+    layout.add (flt (ParamID::masterVolume, "Master Volume", Range (-60.0f, 6.0f, 0.1f), 0.0f, "dB"));
     layout.add (integer (ParamID::polyphony, "Polyphony", 1, 16, 8));
     layout.add (integer (ParamID::pitchBendRange, "Pitch Bend Range", 1, 24, 2, "st"));
 

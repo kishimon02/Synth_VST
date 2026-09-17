@@ -485,15 +485,14 @@ void AiPage::resized()
         b->setBounds (quickRow.removeFromLeft (qw).reduced (2, 1));
     bottom.removeFromBottom (4);
 
-    // model bar: the model under the input box, the effort segment under Send
+    // model bar: model and effort together, right aligned under the Send button
     auto modelRow = bottom.removeFromBottom (24);
-    modelRow.removeFromLeft (92);
-    modelBox.setBounds (modelRow.removeFromLeft (188).reduced (2, 1));
     modelRow.removeFromRight (2);                       // line up with the Send button
-    auto effortArea = modelRow.removeFromRight (juce::jmin (modelRow.getWidth(), 46 + 3 * 58));
-    effortLabel.setBounds (effortArea.removeFromLeft (46));
+    auto barArea = modelRow.removeFromRight (juce::jmin (modelRow.getWidth(), 188 + 46 + 3 * 58));
+    modelBox.setBounds (barArea.removeFromLeft (188).reduced (2, 1));
+    effortLabel.setBounds (barArea.removeFromLeft (46));
     for (auto* b : effortButtons)
-        b->setBounds (effortArea.removeFromLeft (58).reduced (0, 1));
+        b->setBounds (barArea.removeFromLeft (58).reduced (0, 1));
     bottom.removeFromBottom (4);
     auto inputRow = bottom;
     auto left = inputRow.removeFromLeft (92);
