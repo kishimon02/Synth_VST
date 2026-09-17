@@ -63,6 +63,8 @@ cmake --build --preset vs2022-release --target WaveForgeTests
 オシレーターの周波数精度、ADSR のタイミング、LFO の周波数とテンポ同期、モジュレーションマトリクスの加算、
 FX (ディレイのサンプル精度とフィードバック、EQ の利得、ディストーションの上限、リバーブの減衰、バイパス時の完全一致)、
 波形編集 (倍音の分析/合成の往復、フレーム操作、Serum 互換 .wav の保存/読込の往復)、Warp の効果と有限性、
+アルペジエーター (ステップのタイミング、ゲート、Rest / Tie、オクターブ、ホスト同期、パターン JSON)、
+AI (パラメータカタログと変更の適用、キー推定、.mid 書き出しの往復、応答 JSON の解釈、リクエスト本文の形、DPAPI)、
 プリセットのパラメータ ID 妥当性と保存/読込、エンジン全体のレンダリング (有限・不連続なし・解放後に無音) を検証する。
 
 ## プリセット
@@ -87,14 +89,59 @@ FX (ディレイのサンプル精度とフィードバック、EQ の利得、�
 - Phase 4 (3D 表示・本 UI) 完了: OpenGL の 3D ウェーブテーブル表示、出力スコープ、タブ式 UI (下記)
 - Phase 4.5 (音作り・解析) 完了: ウェーブテーブル・エディタ、2D / スペクトル表示、出力の 3D スペクトログラム、
   OSC A Warp (FM / RM / AM from B)
-- 次: Phase 5 (AI アシスタント)、Phase 6 (仕上げ)
+- Phase 5 (AI アシスタント + アルペジエーター) 完了 (下記)
+- 次: Phase 6 (仕上げ)
+
+## アルペジエーター (MOD タブ)
+
+On / Mode (Up, Down, Up-Down, Down-Up, As Played, Random, Chord) / Rate (LFO と同じ 15 分割) / Octaves 1〜4 /
+Gate / Swing / Latch / Pattern。ホスト再生中は PPQ に同期し (ループや頭出しに追従)、停止中と Standalone では内部クロック。
+パターンは内蔵 10 種 + **Custom**。ステップ表示をクリックで note → rest → tie、上下ドラッグでベロシティ、右クリックで
+note_offset (音の飛ばし)、- / + でステップ数 (1〜32)。編集すると Custom になり、プリセット / ソングに JSON で保存される。
+Load... / Save... で `%APPDATA%\WaveForge\ArpPatterns\*.json` に共有できる。
+
+## AI アシスタント (AI タブ)
+
+Claude API (既定 `claude-opus-5`) または OpenAI 互換 API に、作りかけのパートと現在の音の設定を渡して、
+フレーズ (メロディ / コード / ドラム / ベース / ハモリ / 続き / バリエーション)、音作り (パラメータ変更 +
+ウェーブテーブル設計)、アルペジオパターン、解説を JSON で返してもらう。チャット形式なので「もう少し遅く」の
+ような追い指示ができる。
+
+### 準備
+
+1. AI タブ右上の **Settings** でプロバイダーと API キー、モデルを入力し、**Test connection** → **Save**
+2. キーは Windows DPAPI で暗号化して `%APPDATA%\WaveForge\settings.json` に保存される。ソング / プリセット /
+   ログには一切入らない
+
+### 使い方
+
+- **取り込み**: **Rec** を押してから鍵盤 / MIDI キーボードで演奏、または Studio One を再生 (このトラックに来る MIDI が
+  記録される)。もう一度押すと確定し、「12 notes, 2 bars, key A minor」のように表示される。他トラックは Studio One から
+  書き出した `.mid` を **Add .mid...** かドラッグ&ドロップで追加
+- **依頼**: 入力欄に日本語で書くか、**Presets** (カテゴリ別の依頼文ライブラリ) から選んで送信。下のクイックボタンは
+  各カテゴリの代表的な依頼を即送信する。自分で書いた依頼は **Save** でユーザープリセットに登録できる
+  (`%APPDATA%\WaveForge\RequestPresets.json`)
+- **フレーズの結果**: ピアノロール表示。**Audition** でこのシンセで試聴、**Drag to DAW** を Studio One のトラックへ
+  ドラッグすると `.mid` として置ける、**Save .mid...** で保存
+- **音の結果**: 変更一覧 (現在値 → 新しい値)。**Apply** で反映、**Undo** で直前の状態に戻す。ウェーブテーブルが
+  設計されていれば **Apply wavetable to OSC A** で `%APPDATA%\WaveForge\Wavetables\` に保存して読み込む
+- **アルペジオの結果**: **Apply pattern** で Custom パターンに設定、**Save as preset...** で JSON 保存
+
+### 実装メモ
+
+- 1 回の依頼 = `POST /v1/messages` 1 回 (非ストリーミング、構造化出力 `output_config.format` = JSON スキーマ)。
+  役割・ルール・パラメータカタログ (全 146 パラメータの ID / 範囲 / 既定値、APVTS から自動生成) は system の
+  安定ブロックとして `cache_control` を付け、現在の設定値と音楽コンテキストは毎回変わる 2 つ目のブロックに置く
+- 会話履歴は直近 8 往復。エラー時 (401 / 429 / 接続失敗 / refusal / max_tokens) は日本語のメッセージで表示
+- HTTP は `juce::URL` (WinHTTP)。リクエストはバックグラウンド 1 スレッド、UI は Cancel で中断できる
 
 ## UI
 
 - ヘッダー: プリセット、Master / Voices / Bend
 - **OSC** タブ: OSC A / B (テーブル選択、.wav 読込、3D 表示、ピッチ・レベル・ユニゾンのノブ)、Sub / Noise、
   Filter (特性表示付き)、Env 1 / 2
-- **MOD** タブ: LFO 1 / 2、モジュレーションマトリクス 8 スロット
+- **MOD** タブ: LFO 1 / 2、アルペジエーター、モジュレーションマトリクス 8 スロット
+- **AI** タブ: AI アシスタント (下記)
 - **FX** タブ: 5 ユニットの全パラメータ
 - **SCOPE** タブ: 出力の 3D スペクトログラム (20 Hz〜20 kHz 対数軸、手前が最新)、ピークホールド付き 2D スペクトラム、
   大きな波形スコープ。30 fps で 4096 点 FFT を 1 回だけ行い、3 つの表示で共有する。タブが隠れている間は何もしない

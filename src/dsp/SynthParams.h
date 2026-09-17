@@ -3,6 +3,7 @@
 #include "Wavetable.h"
 #include "ModMatrix.h"
 #include "fx/FxParams.h"
+#include "Arpeggiator.h"
 
 namespace wf
 {
@@ -96,6 +97,7 @@ struct SynthParams
     ModSlotParams modSlots[numModSlots];
     GlobalParams  global;
     FxParams      fx;          // master chain, applied after the voices are summed
+    ArpParams     arp;         // in front of the voice allocator (pattern pointer set by the processor)
 
     float bpm = 120.0f;        // from the host playhead, for tempo-synced LFOs / delay
 };

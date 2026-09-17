@@ -326,6 +326,204 @@ void ModMatrixPanel::resized()
 }
 
 //==============================================================================
+ArpPanel::ArpPanel (WaveForgeProcessor& p)
+    : Panel ("ARP", colours::accentMod), processor (p),
+      enabled (p.getAPVTS(), ParamID::Arp::enabled, "On"),
+      mode (p.getAPVTS(), ParamID::Arp::mode, "Mode"),
+      division (p.getAPVTS(), ParamID::Arp::division, "Rate"),
+      octaves (p.getAPVTS(), ParamID::Arp::octaves, "Octaves", colours::accentMod),
+      gate (p.getAPVTS(), ParamID::Arp::gate, "Gate", colours::accentMod),
+      swing (p.getAPVTS(), ParamID::Arp::swing, "Swing", colours::accentMod),
+      latch (p.getAPVTS(), ParamID::Arp::latch, "Latch"),
+      pattern (p.getAPVTS(), ParamID::Arp::pattern, "Pattern"),
+      steps (*this)
+{
+    for (auto* c : std::initializer_list<juce::Component*> { &enabled, &mode, &division, &octaves, &gate, &swing, &latch, &pattern,
+                                                            &shorterButton, &longerButton, &loadButton, &saveButton, &lengthLabel, &steps })
+        addAndMakeVisible (c);
+    shorterButton.onClick = [this] { changeLength (-1); };
+    longerButton.onClick  = [this] { changeLength (+1); };
+    loadButton.onClick = [this] { loadPattern(); };
+    saveButton.onClick = [this] { savePattern(); };
+    lengthLabel.setColour (juce::Label::textColourId, colours::textDim);
+    lengthLabel.setJustificationType (juce::Justification::centred);
+    startTimerHz (30);
+}
+
+void ArpPanel::resized()
+{
+    auto r = body();
+    row (r.removeFromTop (knobRow), { &enabled, &mode, &division, &octaves, &gate, &swing, &latch, &pattern },
+         { 0.6f, 1.3f, 1.1f, 1.0f, 1.0f, 1.0f, 0.8f, 1.5f });
+    r.removeFromTop (4);
+    auto tools = r.removeFromRight (150);
+    steps.setBounds (r.withTrimmedRight (6));
+    tools.removeFromTop (2);
+    auto line1 = tools.removeFromTop (24);
+    shorterButton.setBounds (line1.removeFromLeft (28).reduced (1));
+    longerButton.setBounds (line1.removeFromRight (28).reduced (1));
+    lengthLabel.setBounds (line1);
+    tools.removeFromTop (4);
+    auto line2 = tools.removeFromTop (24);
+    loadButton.setBounds (line2.removeFromLeft (line2.getWidth() / 2).reduced (1));
+    saveButton.setBounds (line2.reduced (1));
+}
+
+void ArpPanel::timerCallback()
+{
+    const auto* active = processor.getActiveArpPattern();
+    const int step = processor.getArpCurrentStep();
+    if (active != lastShown || step != lastStep)
+    {
+        lastShown = active; lastStep = step;
+        if (active != nullptr)
+            lengthLabel.setText (juce::String (active->steps.size()) + " steps", juce::dontSendNotification);
+        steps.repaint();
+    }
+}
+
+wf::ArpPattern ArpPanel::activePatternCopy() const
+{
+    if (const auto* p = processor.getActiveArpPattern())
+        return *p;
+    return wf::ArpPattern::builtins()[0];
+}
+
+void ArpPanel::commit (wf::ArpPattern p)
+{
+    p.name = "Custom";
+    processor.setCustomArpPattern (p, true);
+}
+
+void ArpPanel::changeLength (int delta)
+{
+    auto p = activePatternCopy();
+    const int n = juce::jlimit (1, wf::ArpPattern::maxSteps, (int) p.steps.size() + delta);
+    if (n > (int) p.steps.size()) p.steps.push_back ({});
+    else p.steps.resize ((size_t) n);
+    commit (p);
+}
+
+void ArpPanel::loadPattern()
+{
+    const auto dir = WaveForgeProcessor::userArpPatternDirectory();
+    dir.createDirectory();
+    chooser = std::make_unique<juce::FileChooser> ("Load arp pattern", dir, "*.json");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              const auto file = fc.getResult();
+                              if (! file.existsAsFile()) return;
+                              wf::ArpPattern p;
+                              juce::String error;
+                              if (wf::ArpPattern::fromJson (juce::JSON::parse (file.loadFileAsString()), p, error))
+                                  commit (p);
+                              else
+                                  juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Arp pattern", error);
+                          });
+}
+
+void ArpPanel::savePattern()
+{
+    const auto dir = WaveForgeProcessor::userArpPatternDirectory();
+    dir.createDirectory();
+    chooser = std::make_unique<juce::FileChooser> ("Save arp pattern", dir.getChildFile ("Pattern.json"), "*.json");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              auto file = fc.getResult();
+                              if (file == juce::File()) return;
+                              if (file.getFileExtension().isEmpty()) file = file.withFileExtension (".json");
+                              auto p = activePatternCopy();
+                              p.name = file.getFileNameWithoutExtension();
+                              file.replaceWithText (juce::JSON::toString (p.toJson()));
+                          });
+}
+
+void ArpPanel::StepView::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (colours::widget);
+    g.fillRoundedRectangle (r, 6.0f);
+    const auto* p = panel.processor.getActiveArpPattern();
+    if (p == nullptr || p->steps.empty())
+        return;
+    const int n = (int) p->steps.size();
+    const int current = panel.processor.getArpCurrentStep();
+    const float cw = (r.getWidth() - 8.0f) / (float) n;
+    for (int i = 0; i < n; ++i)
+    {
+        const auto& s = p->steps[(size_t) i];
+        auto cell = juce::Rectangle<float> (r.getX() + 4.0f + cw * (float) i, r.getY() + 4.0f, cw, r.getHeight() - 8.0f).reduced (1.0f, 0.0f);
+        g.setColour (i == current ? colours::accentMod.withAlpha (0.25f) : colours::panel.withAlpha (0.5f));
+        g.fillRoundedRectangle (cell, 3.0f);
+        if (s.kind == wf::ArpStep::note)
+        {
+            const float h = cell.getHeight() * juce::jlimit (0.05f, 1.0f, s.velocity);
+            auto bar = cell.withTop (cell.getBottom() - h).reduced (1.0f, 0.0f);
+            bar.setWidth (bar.getWidth() * juce::jlimit (0.2f, 1.0f, s.gate));
+            g.setColour (i == current ? juce::Colours::white : colours::accentMod);
+            g.fillRoundedRectangle (bar, 2.0f);
+            if (s.noteOffset != 0)
+            {
+                g.setColour (colours::text);
+                g.setFont (juce::FontOptions (9.0f));
+                g.drawText ((s.noteOffset > 0 ? "+" : "") + juce::String (s.noteOffset), cell.toNearestInt(), juce::Justification::centredTop);
+            }
+        }
+        else
+        {
+            g.setColour (colours::textDim);
+            g.setFont (juce::FontOptions (10.0f));
+            g.drawText (s.kind == wf::ArpStep::tie ? "tie" : "-", cell.toNearestInt(), juce::Justification::centred);
+        }
+    }
+    g.setColour (colours::panelEdge);
+    g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+}
+
+int ArpPanel::StepView::stepAt (float x) const
+{
+    const auto* p = panel.processor.getActiveArpPattern();
+    if (p == nullptr || p->steps.empty()) return -1;
+    const float cw = ((float) getWidth() - 8.0f) / (float) p->steps.size();
+    return juce::jlimit (0, (int) p->steps.size() - 1, (int) ((x - 4.0f) / cw));
+}
+
+void ArpPanel::StepView::mouseDown (const juce::MouseEvent& e)
+{
+    editing = panel.activePatternCopy();
+    dragStep = stepAt (e.position.x);
+    dragged = false;
+}
+
+void ArpPanel::StepView::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragStep < 0 || ! juce::isPositiveAndBelow (dragStep, (int) editing.steps.size()))
+        return;
+    if (! dragged && std::abs (e.getDistanceFromDragStartY()) < 3) return;
+    dragged = true;
+    auto& s = editing.steps[(size_t) dragStep];
+    s.kind = wf::ArpStep::note;
+    s.velocity = juce::jlimit (0.05f, 1.0f, 1.0f - (e.position.y - 4.0f) / ((float) getHeight() - 8.0f));
+    panel.commit (editing);
+}
+
+void ArpPanel::StepView::mouseUp (const juce::MouseEvent& e)
+{
+    if (dragStep < 0 || dragged) { dragStep = -1; return; }
+    if (! juce::isPositiveAndBelow (dragStep, (int) editing.steps.size())) return;
+    auto& s = editing.steps[(size_t) dragStep];
+    if (e.mods.isRightButtonDown())
+        s.noteOffset = s.noteOffset >= 3 ? 0 : s.noteOffset + 1;      // right click cycles the offset
+    else
+        s.kind = (s.kind + 1) % 3;                                    // note -> rest -> tie
+    panel.commit (editing);
+    dragStep = -1;
+}
+
+//==============================================================================
 FxUnitPanel::FxUnitPanel (Apvts& a, const juce::String& titleText, const juce::String& enableId,
                           std::vector<std::unique_ptr<juce::Component>> controlsIn)
     : Panel (titleText, colours::accentFx),

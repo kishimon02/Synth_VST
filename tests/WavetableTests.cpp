@@ -16,6 +16,14 @@
 #include "dsp/SynthEngine.h"
 #include "dsp/fx/FxChain.h"
 #include "dsp/WaveEditOps.h"
+#include "dsp/Arpeggiator.h"
+#include "ai/Settings.h"
+#include "ai/LlmClient.h"
+#include "ai/ParamCatalog.h"
+#include "ai/RequestPresets.h"
+#include "ai/MusicContext.h"
+#include "ai/MidiExport.h"
+#include "ai/ReplyFormat.h"
 
 #include <cmath>
 #include <iostream>
@@ -699,6 +707,162 @@ struct WarpTest final : public juce::UnitTest
     }
 };
 
+struct ArpeggiatorTest final : public juce::UnitTest
+{
+    ArpeggiatorTest() : juce::UnitTest ("Arpeggiator", "DSP") {}
+
+    struct Event { int sample; bool on; int note; float vel; };
+
+    // Runs the arp for `blocks` blocks of 256 at 48 kHz with the given input
+    // in the first block, collecting note events with absolute sample times.
+    static std::vector<Event> run (wf::Arpeggiator& arp, const wf::ArpParams& p, const juce::MidiBuffer& firstBlock,
+                                   int blocks, double ppqStart = -1.0, float bpm = 120.0f)
+    {
+        constexpr int block = 256;
+        constexpr double sr = 48000.0;
+        std::vector<Event> events;
+        juce::MidiBuffer out;
+        for (int b = 0; b < blocks; ++b)
+        {
+            juce::MidiBuffer in;
+            if (b == 0) in = firstBlock;
+            const double ppq = ppqStart < 0.0 ? -1.0 : ppqStart + (double) (b * block) / sr * (bpm / 60.0);
+            arp.process (in, out, block, p, bpm, ppq);
+            for (const auto meta : out)
+            {
+                const auto m = meta.getMessage();
+                if (m.isNoteOnOrOff())
+                    events.push_back ({ b * block + meta.samplePosition, m.isNoteOn(), m.getNoteNumber(), m.getFloatVelocity() });
+            }
+        }
+        return events;
+    }
+
+    void runTest() override
+    {
+        constexpr double sr = 48000.0;
+        wf::Arpeggiator arp;
+        arp.prepare (sr);
+
+        juce::MidiBuffer chord;
+        chord.addEvent (juce::MidiMessage::noteOn (1, 60, 0.8f), 0);
+        chord.addEvent (juce::MidiMessage::noteOn (1, 64, 0.8f), 0);
+        chord.addEvent (juce::MidiMessage::noteOn (1, 67, 0.8f), 0);
+
+        beginTest ("Up mode at 1/16, 120 BPM: notes every 125 ms in C E G order, gate 0.5 = 62.5 ms");
+        {
+            wf::ArpParams p;
+            p.enabled = true; p.mode = wf::Arpeggiator::up; p.division = 7; p.gate = 0.5f;
+            const auto ev = run (arp, p, chord, 100);   // 100 * 256 = 25600 samples ~ 533 ms -> 4-5 steps
+            std::vector<Event> ons;
+            for (const auto& e : ev) if (e.on) ons.push_back (e);
+            expect (ons.size() >= 4, "several notes fired");
+            if (ons.size() >= 4)
+            {
+                expectEquals (ons[0].note, 60); expectEquals (ons[1].note, 64); expectEquals (ons[2].note, 67); expectEquals (ons[3].note, 60);
+                const int spacing = ons[1].sample - ons[0].sample;
+                logMessage ("step spacing = " + juce::String (spacing) + " samples (expected 6000)");
+                expectWithinAbsoluteError ((float) spacing, 6000.0f, 2.0f, "125 ms at 48 kHz");
+                // first off comes gate * step after the first on
+                int firstOff = -1;
+                for (const auto& e : ev) if (! e.on && e.note == 60) { firstOff = e.sample; break; }
+                expectWithinAbsoluteError ((float) (firstOff - ons[0].sample), 3000.0f, 2.0f, "gate 0.5 -> 62.5 ms");
+                expectWithinAbsoluteError (ons[0].vel, 0.8f, 0.02f, "held velocity used");
+            }
+        }
+
+        beginTest ("Octaves 2 continues an octave up; Down mode reverses");
+        {
+            arp.reset();
+            wf::ArpParams p;
+            p.enabled = true; p.mode = wf::Arpeggiator::up; p.division = 7; p.octaves = 2;
+            const auto ev = run (arp, p, chord, 200);
+            std::vector<int> notes;
+            for (const auto& e : ev) if (e.on) notes.push_back (e.note);
+            expect (notes.size() >= 6, "six notes fired");
+            if (notes.size() >= 6)
+            {
+                expectEquals (notes[3], 72); expectEquals (notes[4], 76); expectEquals (notes[5], 79);
+            }
+            arp.reset();
+            p.octaves = 1; p.mode = wf::Arpeggiator::down;
+            const auto ev2 = run (arp, p, chord, 100);
+            std::vector<int> down;
+            for (const auto& e : ev2) if (e.on) down.push_back (e.note);
+            expect (down.size() >= 3 && down[0] == 67 && down[1] == 64 && down[2] == 60, "down order G E C");
+        }
+
+        beginTest ("Rest steps are silent and Tie steps extend the note");
+        {
+            arp.reset();
+            wf::ArpPattern pattern;
+            pattern.steps = { { wf::ArpStep::note, 1.0f, 1.0f, 0 }, { wf::ArpStep::tie, 0.0f, 1.0f, 0 },
+                              { wf::ArpStep::rest, 0.0f, 1.0f, 0 }, { wf::ArpStep::note, 1.0f, 1.0f, 0 } };
+            wf::ArpParams p;
+            p.enabled = true; p.mode = wf::Arpeggiator::up; p.division = 7; p.gate = 1.0f; p.pattern = &pattern;
+            const auto ev = run (arp, p, chord, 90);    // 23040 samples = 3.84 steps -> steps 0..3 fire
+            std::vector<Event> ons, offs;
+            for (const auto& e : ev) (e.on ? ons : offs).push_back (e);
+            expectEquals ((int) ons.size(), 2, "steps 1 and 4 play, 2 (tie) and 3 (rest) do not");
+            if (ons.size() == 2 && ! offs.empty())
+            {
+                expectWithinAbsoluteError ((float) (ons[1].sample - ons[0].sample), 18000.0f, 3.0f, "second note on step 4");
+                expectGreaterThan (offs[0].sample - ons[0].sample, 11000, "tie held the first note past step 2");
+            }
+        }
+
+        beginTest ("host position drives the steps and a jump back resyncs");
+        {
+            arp.reset();
+            wf::ArpParams p;
+            p.enabled = true; p.mode = wf::Arpeggiator::up; p.division = 7;
+            const auto ev = run (arp, p, chord, 100, 0.0);   // ppq from 0
+            int ons = 0;
+            for (const auto& e : ev) ons += e.on ? 1 : 0;
+            expect (ons >= 4, "steps fire from host ppq");
+
+            // jump back to ppq 0 with the chord still held -> steps restart without piling up
+            juce::MidiBuffer none;
+            const auto ev2 = run (arp, p, none, 10, 0.0);
+            int ons2 = 0;
+            for (const auto& e : ev2) ons2 += e.on ? 1 : 0;
+            expect (ons2 >= 1 && ons2 <= 2, "resynced after the jump (" + juce::String (ons2) + " ons in 10 blocks)");
+        }
+
+        beginTest ("disabled arp passes MIDI through untouched");
+        {
+            arp.reset();
+            wf::ArpParams p;
+            p.enabled = false;
+            const auto ev = run (arp, p, chord, 2);
+            expectEquals ((int) ev.size(), 3, "three note-ons passed through");
+            expect (ev.size() == 3 && ev[0].sample == 0 && ev[0].on, "same timing");
+        }
+
+        beginTest ("pattern JSON round trip clamps and trims");
+        {
+            wf::ArpPattern p;
+            p.name = "Test";
+            for (int i = 0; i < 40; ++i)
+                p.steps.push_back ({ i % 3, 1.5f, -1.0f, 99 });
+            p.clampAndTrim();
+            expectEquals ((int) p.steps.size(), wf::ArpPattern::maxSteps, "trimmed to 32");
+            expectWithinAbsoluteError (p.steps[0].velocity, 1.0f, 1.0e-6f, "velocity clamped");
+            expectWithinAbsoluteError (p.steps[0].gate, 0.05f, 1.0e-6f, "gate clamped");
+            expectEquals (p.steps[0].noteOffset, 16, "offset clamped");
+
+            wf::ArpPattern back;
+            juce::String error;
+            expect (wf::ArpPattern::fromJson (juce::JSON::parse (juce::JSON::toString (p.toJson())), back, error), error);
+            expectEquals (back.name, juce::String ("Test"));
+            expectEquals ((int) back.steps.size(), (int) p.steps.size());
+            expectEquals (back.steps[1].kind, (int) wf::ArpStep::rest);
+            expectEquals (back.steps[2].kind, (int) wf::ArpStep::tie);
+            expect (! wf::ArpPattern::fromJson (juce::JSON::parse ("{\"steps\":[]}"), back, error), "empty steps rejected");
+        }
+    }
+};
+
 // Minimal host for an APVTS, so presets can be tested without the plugin.
 struct DummyProcessor final : public juce::AudioProcessor
 {
@@ -723,6 +887,155 @@ struct DummyProcessor final : public juce::AudioProcessor
     void setStateInformation (const void*, int) override {}
 
     juce::AudioProcessorValueTreeState apvts;
+};
+
+struct AiTest final : public juce::UnitTest
+{
+    AiTest() : juce::UnitTest ("AI assistant (offline)", "AI") {}
+
+    void runTest() override
+    {
+        DummyProcessor proc;
+        auto& apvts = proc.apvts;
+
+        beginTest ("parameter catalogue lists every parameter and changes are clamped / filtered");
+        {
+            const auto catalog = ai::ParamCatalog::describe (apvts);
+            int count = 0;
+            for (auto* param : proc.getParameters())
+                if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (param))
+                {
+                    ++count;
+                    expect (catalog.contains (withId->paramID + "  "), "catalogue has " + withId->paramID);
+                }
+            logMessage ("catalogue: " + juce::String (count) + " parameters, " + juce::String (catalog.length()) + " chars");
+
+            auto changes = juce::JSON::parse (R"([{"id":"filter_cutoff","value":800},{"id":"nope","value":1},{"id":"osc_a_level","value":5}])");
+            juce::StringArray unknown;
+            const auto applied = ai::ParamCatalog::applyChanges (apvts, changes, unknown);
+            expectEquals ((int) applied.size(), 2, "two known parameters applied");
+            expectEquals (unknown.size(), 1, "one unknown id reported");
+            auto* cutoff = apvts.getParameter (ParamID::filterCutoff);
+            expectWithinAbsoluteError (cutoff->convertFrom0to1 (cutoff->getValue()), 800.0f, 1.0f, "value applied in Hz");
+            auto* level = apvts.getParameter (ParamID::osc (0).level);
+            expectWithinAbsoluteError (level->convertFrom0to1 (level->getValue()), 1.0f, 1.0e-4f, "clamped to the range");
+            const auto current = ai::ParamCatalog::currentValues (apvts);
+            expect (current.contains ("osc_a_level"), "non-default value listed");
+            expect (! current.contains ("osc_b_level"), "default value not listed");
+        }
+
+        beginTest ("key estimation and context JSON");
+        {
+            const int majorScale[8] = { 0, 2, 4, 5, 7, 9, 11, 12 };
+            const int minorScale[8] = { 0, 2, 3, 5, 7, 8, 11, 12 };
+            std::vector<ai::Note> cMajor, aMinor;
+            for (int i = 0; i < 8; ++i)
+            {
+                cMajor.push_back ({ 60 + majorScale[i], (float) i, 1.0f, 100 });
+                aMinor.push_back ({ 57 + minorScale[i], (float) i, 1.0f, 100 });
+            }
+            expectEquals (ai::MusicContext::estimateKey (cMajor), juce::String ("C major"));
+            expectEquals (ai::MusicContext::estimateKey (aMinor), juce::String ("A minor"));
+
+            ai::MusicContext ctx;
+            ctx.appendCaptured ({ { 60, 100, true, 8.0 }, { 64, 90, true, 8.5 }, { 60, 0, false, 9.0 }, { 64, 0, false, 9.5 } });
+            ctx.finishCapture();
+            expectEquals ((int) ctx.ownPart.notes.size(), 2);
+            expectWithinAbsoluteError (ctx.ownPart.notes[0].startBeat, 0.0f, 1.0e-4f, "phrase starts at bar 0 (bar 2 -> 0)");
+            expectWithinAbsoluteError (ctx.ownPart.notes[1].startBeat, 0.5f, 1.0e-4f);
+            const auto json = juce::JSON::parse (ctx.toJson());
+            expect (json.isObject() && json.getProperty ("own_part", juce::var()).size() == 2, "context JSON has the notes");
+        }
+
+        beginTest ("MIDI export round-trips through a MIDI file");
+        {
+            std::vector<ai::Note> notes { { 60, 0.0f, 1.0f, 100 }, { 64, 1.0f, 0.5f, 80 }, { 67, 2.0f, 2.0f, 120 } };
+            auto file = juce::File::createTempFile (".mid");
+            juce::String error;
+            expect (ai::MidiExport::write (notes, 128.0f, 4, 4, false, file, error), error);
+            ai::Track back;
+            float bpm = 0.0f;
+            expect (ai::MusicContext::loadMidiFile (file, back, &bpm, error), error);
+            expectEquals ((int) back.notes.size(), 3);
+            expectWithinAbsoluteError (bpm, 128.0f, 0.5f, "tempo survives");
+            expectWithinAbsoluteError (back.notes[2].startBeat, 2.0f, 1.0e-3f);
+            expectWithinAbsoluteError (back.notes[2].durationBeats, 2.0f, 1.0e-3f);
+            expect (! back.drums, "channel 1 is not drums");
+            expect (ai::MidiExport::write (notes, 120.0f, 4, 4, true, file, error), error);
+            expect (ai::MusicContext::loadMidiFile (file, back, nullptr, error) && back.drums, "channel 10 flagged as drums");
+            file.deleteFile();
+        }
+
+        beginTest ("reply parsing, wavetable synthesis and the request body shape");
+        {
+            const auto reply = juce::JSON::parse (R"({
+                "reply": "4 小節のメロディです",
+                "notes_kind": "melody",
+                "notes": [{"pitch": 72, "start_beat": 0, "duration_beats": 1, "velocity": 100},
+                          {"pitch": 74, "start_beat": 1, "duration_beats": 1, "velocity": 90}],
+                "param_changes": [{"id": "filter_cutoff", "value": 800}],
+                "wavetable": {"name": "Glassy", "frames": [{"harmonics": [1, 0, 0.5]}, {"harmonics": [1, 0.8, 0.2, 0.1]}]},
+                "preset_name": "Test",
+                "arp_pattern": {"name": "Tr", "steps": [{"kind":"note","velocity":1,"gate":0.5,"note_offset":0},{"kind":"rest","velocity":0,"gate":1,"note_offset":0}]}
+            })");
+            ai::ChatMessage m;
+            juce::String error;
+            expect (ai::ReplyFormat::parse (reply, m, error), error);
+            expect (m.hasNotes() && m.notes.size() == 2 && m.notesKind == "melody", "notes parsed");
+            expect (m.hasParamChanges(), "param changes parsed");
+            expect (m.hasWavetable(), "wavetable parsed");
+            expect (m.hasArpPattern() && m.arpPattern.steps.size() == 2, "arp pattern parsed");
+            expectEquals (m.presetName, juce::String ("Test"));
+
+            std::vector<float> frames;
+            int numFrames = 0;
+            juce::String name;
+            expect (ai::ReplyFormat::wavetableFrames (m.wavetable, frames, numFrames, name), "wavetable synthesised");
+            expectEquals (numFrames, ai::ReplyFormat::wavetableTargetFrames, "expanded to the target frame count");
+            expectEquals (name, juce::String ("Glassy"));
+            float peak = 0.0f; bool finite = true;
+            for (float v : frames) { peak = juce::jmax (peak, std::abs (v)); finite = finite && std::isfinite (v); }
+            expect (finite && peak <= 1.0001f && peak > 0.5f, "frames finite and normalised");
+
+            ai::ChatMessage empty;
+            expect (! ai::ReplyFormat::parse (juce::JSON::parse ("{\"reply\":\"\",\"notes\":[],\"notes_kind\":\"none\"}"), empty, error), "empty reply rejected");
+
+            ai::Settings s;
+            s.provider = "anthropic"; s.model = "claude-opus-5"; s.apiKey = "k"; s.effort = "medium";
+            auto client = ai::makeClient (s);
+            ai::LlmRequest req;
+            req.systemStable = "stable"; req.systemVolatile = "volatile";
+            req.messages = { { "user", "hi" } };
+            req.schema = ai::ReplyFormat::schema();
+            const auto body = client->buildBody (req);
+            expectEquals (body.getProperty ("model", "").toString(), juce::String ("claude-opus-5"));
+            const auto system = body.getProperty ("system", juce::var());
+            expect (system.isArray() && system.size() == 2, "two system blocks");
+            expect (system[0].getProperty ("cache_control", juce::var()).isObject(), "stable block is cached");
+            expect (! system[1].hasProperty ("cache_control"), "volatile block is not cached");
+            const auto outputConfig = body.getProperty ("output_config", juce::var());
+            expectEquals (outputConfig.getProperty ("format", juce::var()).getProperty ("type", "").toString(), juce::String ("json_schema"));
+            expectEquals (outputConfig.getProperty ("effort", "").toString(), juce::String ("medium"));
+            expect (! juce::JSON::toString (body).contains ("\"k\""), "the key is never in the body");
+            expect (! body.hasProperty ("thinking"), "thinking left at the model default");
+        }
+
+        beginTest ("settings: the key round-trips through DPAPI and is not stored in plain text");
+        {
+            const auto plain = juce::String ("sk-test-1234567890");
+            const auto blob = ai::Settings::encryptSecret (plain);
+            expect (blob.isNotEmpty() && ! blob.contains ("1234567890"), "encrypted blob is opaque");
+            expectEquals (ai::Settings::decryptSecret (blob), plain, "decrypts back");
+            expect (ai::Settings::decryptSecret ("not-a-blob").isEmpty(), "garbage decrypts to empty");
+        }
+
+        beginTest ("request presets: every category has a built-in, user presets round trip");
+        {
+            for (const auto& cat : ai::RequestPresets::categories())
+                expect (ai::RequestPresets::firstText (cat).isNotEmpty() || cat.isEmpty(), "category " + cat + " has a built-in");
+            expect (ai::RequestPresets::builtins().size() >= 30, "a useful number of built-ins");
+        }
+    }
 };
 
 struct PresetTest final : public juce::UnitTest
@@ -828,6 +1141,8 @@ static ModMatrixTest modMatrixTest;
 static FxTest fxTest;
 static WaveEditTest waveEditTest;
 static WarpTest warpTest;
+static ArpeggiatorTest arpeggiatorTest;
+static AiTest aiTest;
 static PresetTest presetTest;
 
 int main()

@@ -4,6 +4,7 @@
 #include "dsp/ModMatrix.h"
 #include "dsp/fx/Distortion.h"
 #include "dsp/Voice.h"
+#include "dsp/Arpeggiator.h"
 
 namespace
 {
@@ -151,6 +152,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         layout.add (choice (m.source, n + "Source", sourceNames, 0));
         layout.add (choice (m.dest, n + "Dest", destNames, 0));
         layout.add (flt (m.amount, n + "Amount", Range (-1.0f, 1.0f, 0.001f), 0.0f));
+    }
+
+    // ---- ARPEGGIATOR
+    {
+        using namespace ParamID::Arp;
+        auto patternNames = wf::ArpPattern::builtinNames();
+        patternNames.add ("Custom");
+        layout.add (boolean (enabled, "Arp On", false));
+        layout.add (choice (mode, "Arp Mode", wf::Arpeggiator::modeNames(), 0));
+        layout.add (choice (division, "Arp Rate", wf::Lfo::divisionNames(), 7));
+        layout.add (integer (octaves, "Arp Octaves", 1, 4, 1));
+        layout.add (flt (gate, "Arp Gate", Range (0.05f, 1.0f, 0.01f), 0.5f));
+        layout.add (flt (swing, "Arp Swing", Range (0.0f, 0.75f, 0.01f), 0.0f));
+        layout.add (choice (pattern, "Arp Pattern", patternNames, 0));
+        layout.add (boolean (latch, "Arp Latch", false));
     }
 
     // ---- FX

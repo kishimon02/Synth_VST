@@ -23,6 +23,8 @@ erDiagram
     PRESET ||--|{ LFO : "has 2"
     PRESET ||--|{ MOD_SLOT : "has 8"
     PRESET ||--|{ FX_UNIT : "has 5"
+    PRESET ||--|| ARP : "has"
+    ARP ||--o| ARP_PATTERN : "custom pattern (JSON)"
     OSCILLATOR }o--|| WAVETABLE : "uses"
     WAVETABLE ||--|{ WT_FRAME : "contains"
     OSCILLATOR ||--|| UNISON : has
@@ -137,6 +139,20 @@ erDiagram
     }
     MOD_DEST {
         string id PK "パラメータ ID (osc_a_wt_pos, filter_cutoff ...)"
+    }
+    ARP {
+        bool enabled
+        enum mode "up down updown downup asplayed random chord"
+        enum division "LFO と同じ 15 分割"
+        int octaves "1-4"
+        float gate "0.05-1"
+        float swing "0-0.75"
+        enum pattern "内蔵 10 種 + custom"
+        bool latch
+    }
+    ARP_PATTERN {
+        string name
+        json steps "1-32: kind(note/rest/tie) velocity gate note_offset"
     }
     FX_UNIT {
         enum type PK "distortion eq chorus delay reverb"
@@ -275,6 +291,19 @@ erDiagram
 ---
 
 ## C. AI アシスタント・アプリ設定
+
+実装 (Phase 5) との対応:
+
+| 図の実体 | 実装 | 保存先 |
+|---|---|---|
+| APP_SETTINGS + LLM_PROVIDER | `ai::Settings` (provider, model, base_url, effort, timeout_sec, api_key_encrypted) | `%APPDATA%\WaveForge\settings.json` (キーは DPAPI) |
+| CAPTURE_SESSION / CAPTURED_NOTE | `ai::MidiCapture` (ロックフリー FIFO) → `ai::MusicContext::ownPart` (beat 単位) | メモリのみ |
+| CONTEXT_TRACK / CONTEXT_NOTE | `ai::MusicContext::contextTracks` (`.mid` から読込) | メモリのみ |
+| SUGGESTION_REQUEST | `ai::LlmRequest` (system 安定ブロック + 可変ブロック + 履歴 + JSON スキーマ) | 送信のみ |
+| SUGGESTION / SUGGESTED_NOTE | `ai::ChatMessage` (reply, notes, param_changes, wavetable, arp_pattern, preset_name) | 会話中のみ (エディタを閉じても保持) |
+| MIDI_EXPORT | `ai::MidiExport` (Type 1、テンポ・拍子付き、ドラムは ch10) | `%TEMP%\WaveForge\*.mid` |
+| (追加) REQUEST_PRESET | `ai::RequestPreset` (category, name, text) | 内蔵 + `%APPDATA%\WaveForge\RequestPresets.json` |
+| (追加) ARP_PATTERN_FILE | `wf::ArpPattern` JSON | `%APPDATA%\WaveForge\ArpPatterns\*.json` |
 
 ```mermaid
 erDiagram

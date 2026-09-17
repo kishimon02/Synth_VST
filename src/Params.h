@@ -134,8 +134,22 @@ namespace ParamID
         }
     }
 
+    // ARPEGGIATOR
+    namespace Arp
+    {
+        inline constexpr auto enabled  = "arp_enabled";
+        inline constexpr auto mode     = "arp_mode";
+        inline constexpr auto division = "arp_division";
+        inline constexpr auto octaves  = "arp_octaves";
+        inline constexpr auto gate     = "arp_gate";
+        inline constexpr auto swing    = "arp_swing";
+        inline constexpr auto pattern  = "arp_pattern";     // built-in index, or numBuiltins = Custom
+        inline constexpr auto latch    = "arp_latch";
+    }
+
     // Non-parameter state stored as properties on the APVTS ValueTree.
     inline const juce::Identifier oscTableProperty (int index) { return index == 0 ? "osc_a_table" : "osc_b_table"; }
+    inline const juce::Identifier arpCustomPatternProperty = "arp_custom_pattern";   // JSON string
 }
 
 namespace Params

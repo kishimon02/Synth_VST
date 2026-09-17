@@ -10,6 +10,10 @@
 #include "Diagnostics.h"
 #include "dsp/SynthEngine.h"
 #include "dsp/fx/FxChain.h"
+#include "dsp/Arpeggiator.h"
+#include "ai/MusicContext.h"
+#include "ai/PreviewPlayer.h"
+#include "ai/Assistant.h"
 #include "ui/Scope.h"
 
 class WaveForgeProcessor final : public juce::AudioProcessor,
@@ -51,6 +55,22 @@ public:
     const ui::ScopeBuffer& getScopeBuffer() const noexcept { return scope; }
     const wf::EnvDisplay& getEnvDisplay() const noexcept { return engine.getEnvDisplay(); }
 
+    // Arpeggiator (message thread). The custom pattern lives in the state
+    // tree as JSON so it travels with presets / songs.
+    void setCustomArpPattern (const wf::ArpPattern& pattern, bool selectCustom);
+    const wf::ArpPattern& getCustomArpPattern() const noexcept { return *customArpPattern.load (std::memory_order_acquire); }
+    const wf::ArpPattern* getActiveArpPattern() const noexcept;   // what the audio thread plays
+    int getArpCurrentStep() const noexcept { return arpStep.load (std::memory_order_relaxed); }
+    static juce::File userArpPatternDirectory();
+
+    // AI assistant (message thread) and its audio-thread helpers
+    ai::Assistant& getAssistant() noexcept { return *assistant; }
+    ai::MidiCapture& getMidiCapture() noexcept { return capture; }
+    ai::PreviewPlayer& getPreviewPlayer() noexcept { return preview; }
+    void setCurrentPresetName (const juce::String& name) { currentPresetName = name; sendChangeMessage(); }
+    juce::ValueTree buildStateTree();
+    void applyStateTree (const juce::ValueTree& state);
+
     int  getOscTableIndex (int osc) const noexcept { return oscTableIndex[osc]; }
     const wf::Wavetable* getOscTable (int osc) const noexcept { return oscTable[osc].load (std::memory_order_relaxed); }
     void setOscTable (int osc, int bankIndex);
@@ -72,8 +92,6 @@ public:
 private:
     void timerCallback() override;
     void setOscTableBySourceId (int osc, const juce::String& sourceId);
-    juce::ValueTree buildStateTree();
-    void applyStateTree (const juce::ValueTree& state);
 
     juce::AudioProcessorValueTreeState apvts;
     juce::MidiKeyboardState keyboardState;
@@ -82,6 +100,16 @@ private:
     wf::SynthEngine engine;
     wf::FxChain fx;
     ui::ScopeBuffer scope;
+    wf::Arpeggiator arp;
+    juce::MidiBuffer arpBuffer;
+    std::vector<std::shared_ptr<wf::ArpPattern>> customPatterns;   // append-only, like the wavetable bank
+    std::atomic<const wf::ArpPattern*> customArpPattern { nullptr };
+    std::atomic<int> arpStep { -1 };
+    std::atomic<double> hostPpq { -1.0 };
+    ai::MidiCapture capture;
+    ai::PreviewPlayer preview;
+    std::unique_ptr<ai::Assistant> assistant;
+    double internalBeat = 0.0;   // beat counter used for capture when the host is not playing
 
     std::atomic<const wf::Wavetable*> oscTable[2] { nullptr, nullptr };
     int oscTableIndex[2] { 0, 0 };

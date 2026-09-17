@@ -112,6 +112,49 @@ private:
     juce::Label header;
 };
 
+// Arpeggiator: controls plus an editable step view. Editing a step (or the
+// length) writes the Custom pattern into the processor and selects it.
+class ArpPanel final : public Panel, private juce::Timer
+{
+public:
+    explicit ArpPanel (WaveForgeProcessor&);
+    void resized() override;
+
+private:
+    class StepView final : public juce::Component
+    {
+    public:
+        explicit StepView (ArpPanel& p) : panel (p) {}
+        void paint (juce::Graphics&) override;
+        void mouseDown (const juce::MouseEvent&) override;
+        void mouseDrag (const juce::MouseEvent&) override;
+        void mouseUp (const juce::MouseEvent&) override;
+    private:
+        int stepAt (float x) const;
+        ArpPanel& panel;
+        int dragStep = -1;
+        bool dragged = false;
+        wf::ArpPattern editing;
+    };
+
+    void timerCallback() override;
+    void changeLength (int delta);
+    void loadPattern();
+    void savePattern();
+    wf::ArpPattern activePatternCopy() const;
+    void commit (wf::ArpPattern pattern);
+
+    WaveForgeProcessor& processor;
+    ParamToggle enabled; ParamCombo mode, division; ParamKnob octaves, gate, swing; ParamToggle latch;
+    ParamCombo pattern;
+    juce::TextButton shorterButton { "-" }, longerButton { "+" }, loadButton { "Load..." }, saveButton { "Save..." };
+    juce::Label lengthLabel;
+    StepView steps;
+    std::unique_ptr<juce::FileChooser> chooser;
+    const wf::ArpPattern* lastShown = nullptr;
+    int lastStep = -1;
+};
+
 // One FX unit: title, On toggle, then a row of controls.
 class FxUnitPanel final : public Panel
 {

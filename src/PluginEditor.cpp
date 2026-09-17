@@ -38,10 +38,10 @@ void WaveForgeEditor::OscPage::resized()
     }
 }
 
-WaveForgeEditor::ModPage::ModPage (juce::AudioProcessorValueTreeState& a)
-    : lfo1 (a, 0), lfo2 (a, 1), matrix (a)
+WaveForgeEditor::ModPage::ModPage (WaveForgeProcessor& p)
+    : lfo1 (p.getAPVTS(), 0), lfo2 (p.getAPVTS(), 1), arp (p), matrix (p.getAPVTS())
 {
-    for (auto* c : std::initializer_list<juce::Component*> { &lfo1, &lfo2, &matrix })
+    for (auto* c : std::initializer_list<juce::Component*> { &lfo1, &lfo2, &arp, &matrix })
         addAndMakeVisible (c);
 }
 
@@ -54,6 +54,8 @@ void WaveForgeEditor::ModPage::resized()
     lfo1.setBounds (top.removeFromLeft (half));
     top.removeFromLeft (6);
     lfo2.setBounds (top);
+    arp.setBounds (r.removeFromTop (176));
+    r.removeFromTop (6);
     matrix.setBounds (r);
 }
 
@@ -62,8 +64,9 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     : AudioProcessorEditor (p),
       processor (p),
       global (p.getAPVTS()),
-      oscPage (p), modPage (p.getAPVTS()), fxPage (p.getAPVTS()),
+      oscPage (p), modPage (p), fxPage (p.getAPVTS()),
       scopePage (p.getScopeBuffer(), [&p] { return p.getCurrentSampleRate(); }),
+      aiPage (p),
       scope (p.getScopeBuffer()),
       keyboard (p.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard)
 {
@@ -102,6 +105,7 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     tabs.addTab ("MOD", ui::colours::background, &modPage, false);
     tabs.addTab ("FX",  ui::colours::background, &fxPage,  false);
     tabs.addTab ("SCOPE", ui::colours::background, &scopePage, false);
+    tabs.addTab ("AI", ui::colours::background, &aiPage, false);
     tabs.setTabBarDepth (30);
     tabs.setOutline (0);
     addAndMakeVisible (tabs);

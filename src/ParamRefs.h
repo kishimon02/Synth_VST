@@ -26,6 +26,8 @@ struct ParamRefs
     struct Mod { P enabled, source, dest, amount; } mod[wf::numModSlots];
     P masterVolume, polyphony, pitchBendRange;
 
+    struct Arp { P enabled, mode, division, octaves, gate, swing, pattern, latch; } arp;
+
     struct Fx
     {
         P distEnabled, distMode, distDrive, distOversample, distOutput, distMix;
@@ -89,6 +91,11 @@ struct ParamRefs
         polyphony = get (ParamID::polyphony);
         pitchBendRange = get (ParamID::pitchBendRange);
 
+        {
+            namespace A = ParamID::Arp;
+            arp = { get (A::enabled), get (A::mode), get (A::division), get (A::octaves),
+                    get (A::gate), get (A::swing), get (A::pattern), get (A::latch) };
+        }
         {
             namespace F = ParamID::Fx;
             fx.distEnabled = get (F::distEnabled);       fx.distMode = get (F::distMode);
@@ -174,6 +181,11 @@ struct ParamRefs
         s.global.masterGain = juce::Decibels::decibelsToGain (f (masterVolume), -60.0f);
         s.global.polyphony = n (polyphony);
         s.global.pitchBendRange = n (pitchBendRange);
+
+        s.arp.enabled = b (arp.enabled); s.arp.mode = n (arp.mode); s.arp.division = n (arp.division);
+        s.arp.octaves = n (arp.octaves); s.arp.gate = f (arp.gate); s.arp.swing = f (arp.swing);
+        s.arp.latch = b (arp.latch);
+        s.arp.pattern = nullptr;   // resolved by the processor from arp.pattern + the custom pattern
 
         auto& d = s.fx.distortion;
         d.enabled = b (fx.distEnabled); d.mode = n (fx.distMode); d.driveDb = f (fx.distDrive);

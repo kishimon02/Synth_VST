@@ -60,11 +60,22 @@ add_custom_command(TARGET WaveForge_VST3 POST_BUILD
     COMMENT "Installing single-file VST3 to ${WAVEFORGE_VST3_DIR}/WaveForge.vst3"
     VERBATIM)
 
+set(WAVEFORGE_AI_SOURCES
+    src/ai/Settings.cpp
+    src/ai/LlmClient.cpp
+    src/ai/ParamCatalog.cpp
+    src/ai/RequestPresets.cpp
+    src/ai/MusicContext.cpp
+    src/ai/MidiExport.cpp
+    src/ai/ReplyFormat.cpp
+)
+
 set(WAVEFORGE_DSP_SOURCES
     src/dsp/Wavetable.cpp
     src/dsp/WavetableLoader.cpp
     src/dsp/Voice.cpp
     src/dsp/SynthEngine.cpp
+    src/dsp/Arpeggiator.cpp
     src/dsp/fx/FxChain.cpp
 )
 
@@ -77,10 +88,17 @@ target_sources(WaveForge PRIVATE
     src/ui/LineStack3DView.cpp
     src/ui/Wavetable3DView.cpp
     src/ui/WavetableEditor.cpp
+    src/ui/ai/SettingsDialog.cpp
+    src/ui/ai/AiPage.cpp
+    src/ai/Assistant.cpp
+    ${WAVEFORGE_AI_SOURCES}
     ${WAVEFORGE_DSP_SOURCES}
 )
 
 target_include_directories(WaveForge PRIVATE src)
+if(WIN32)
+    target_link_libraries(WaveForge PRIVATE crypt32)   # DPAPI for the API key
+endif()
 
 # Optional audio-thread instrumentation (writes %TEMP%/WaveForge_diag.log every
 # 2 s: block sizes, output discontinuities, processing time, host call gaps).
@@ -132,9 +150,13 @@ target_sources(WaveForgeTests PRIVATE
     tests/WavetableTests.cpp
     src/Params.cpp
     src/PresetManager.cpp
+    ${WAVEFORGE_AI_SOURCES}
     ${WAVEFORGE_DSP_SOURCES}
 )
 target_include_directories(WaveForgeTests PRIVATE src)
+if(WIN32)
+    target_link_libraries(WaveForgeTests PRIVATE crypt32)
+endif()
 target_compile_definitions(WaveForgeTests PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0

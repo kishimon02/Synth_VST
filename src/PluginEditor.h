@@ -9,10 +9,12 @@
 #include "ui/Scope.h"
 #include "ui/ScopePage.h"
 #include "ui/WavetableEditor.h"
+#include "ui/ai/AiPage.h"
 
 // Main editor: header (title, preset bar), three tabbed pages (OSC / MOD /
 // FX), and a footer with the output scope and the on-screen keyboard.
 class WaveForgeEditor final : public juce::AudioProcessorEditor,
+                              public juce::DragAndDropContainer,   // external .mid drag from the AI page
                               private juce::ChangeListener,
                               private juce::Timer
 {
@@ -45,9 +47,10 @@ private:
 
     struct ModPage final : public juce::Component
     {
-        explicit ModPage (juce::AudioProcessorValueTreeState&);
+        explicit ModPage (WaveForgeProcessor&);
         void resized() override;
         ui::LfoPanel lfo1, lfo2;
+        ui::ArpPanel arp;
         ui::ModMatrixPanel matrix;
     };
 
@@ -66,6 +69,7 @@ private:
     ModPage modPage;
     ui::FxPage fxPage;
     ui::ScopePage scopePage;
+    ui::AiPage aiPage;
 
     // The wavetable editor replaces the tabs while open (the OSC page's GL
     // views live in native child windows, so nothing can be drawn over them).
