@@ -164,6 +164,23 @@ void SynthEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuffer
     }
     renderSegment (out, pos, numSamples - pos, p);
 
+    // Envelope display: follow the most recently started voice.
+    const Voice* newest = nullptr;
+    for (const auto& v : voices)
+        if (v.isActive() && (newest == nullptr || v.getAge() > newest->getAge()))
+            newest = &v;
+    envDisplay.active.store (newest != nullptr, std::memory_order_relaxed);
+    if (newest != nullptr)
+    {
+        const float msPerSample = (float) (1000.0 / sampleRate);
+        envDisplay.heldMs.store ((float) newest->getSamplesSinceNoteOn() * msPerSample, std::memory_order_relaxed);
+        envDisplay.releaseMs.store (newest->getSamplesSinceNoteOff() >= 0
+                                        ? (float) newest->getSamplesSinceNoteOff() * msPerSample : -1.0f,
+                                    std::memory_order_relaxed);
+        envDisplay.level[0].store (newest->getEnvLevel (0), std::memory_order_relaxed);
+        envDisplay.level[1].store (newest->getEnvLevel (1), std::memory_order_relaxed);
+    }
+
     // Advance the free-running master phases once per block, after rendering,
     // so a voice started during this block copies the block's starting phase.
     // At most one block of error - inaudible for an LFO - and it costs two

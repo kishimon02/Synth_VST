@@ -67,6 +67,8 @@ void Voice::startPending (const SynthParams& p)
     age = pendingAge;
     pendingNote = -1;
     active = true;
+    samplesSinceOn = 0;
+    samplesSinceOff = -1;
     randomValue = rng.nextFloat() * 2.0f - 1.0f;
 
     oscA.setTable (p.osc[0].table);
@@ -98,6 +100,8 @@ void Voice::noteOff()
     }
     env1.noteOff();
     env2.noteOff();
+    if (samplesSinceOff < 0)
+        samplesSinceOff = 0;
 }
 
 void Voice::kill()
@@ -195,6 +199,9 @@ void Voice::render (juce::AudioBuffer<float>& out, int start, int num, const Syn
 
     float* L = out.getWritePointer (0, start);
     float* R = out.getNumChannels() > 1 ? out.getWritePointer (1, start) : nullptr;
+
+    samplesSinceOn += num;                     // block granularity is plenty for a display
+    if (samplesSinceOff >= 0) samplesSinceOff += num;
 
     for (int i = 0; i < num; ++i)
     {

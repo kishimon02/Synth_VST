@@ -3,6 +3,7 @@
 #include "Controls.h"
 #include "Wavetable3DView.h"
 #include "FilterView.h"
+#include "EnvView.h"
 #include "../PluginProcessor.h"
 
 // One panel per synth section. Each owns its parameter widgets; the editor
@@ -66,9 +67,10 @@ private:
 class EnvPanel final : public Panel
 {
 public:
-    EnvPanel (Apvts&, int index);
+    EnvPanel (Apvts&, int index, const wf::EnvDisplay& live);
     void resized() override;
 private:
+    EnvView view;
     ParamKnob attack, decay, sustain, release;
 };
 

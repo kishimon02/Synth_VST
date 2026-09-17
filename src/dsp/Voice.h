@@ -42,6 +42,11 @@ public:
     int  getNote() const noexcept     { return note; }
     uint32_t getAge() const noexcept  { return age; }
 
+    // For the envelope display: elapsed time and current levels.
+    int   getSamplesSinceNoteOn() const noexcept  { return samplesSinceOn; }
+    int   getSamplesSinceNoteOff() const noexcept { return samplesSinceOff; }   // -1 while held
+    float getEnvLevel (int index) const noexcept  { return index == 0 ? env1.getLevel() : env2.getLevel(); }
+
     void setPitchBendSemitones (float semis) noexcept { pitchBend = semis; }
     void setControllers (float modWheelIn, float aftertouchIn) noexcept
     {
@@ -71,6 +76,7 @@ private:
     float modWheel = 0.0f, aftertouch = 0.0f, randomValue = 0.0f;
     uint32_t age = 0, pendingAge = 0;
     float pendingLfoPhase[2] { 0.0f, 0.0f };
+    int samplesSinceOn = 0, samplesSinceOff = -1;
 
     // Cached per control block
     float ampGain = 1.0f;

@@ -4,7 +4,7 @@
 WaveForgeEditor::OscPage::OscPage (WaveForgeProcessor& p)
     : oscA (p, 0), oscB (p, 1),
       subNoise (p.getAPVTS()), filter (p.getAPVTS()),
-      env1 (p.getAPVTS(), 0), env2 (p.getAPVTS(), 1)
+      env1 (p.getAPVTS(), 0, p.getEnvDisplay()), env2 (p.getAPVTS(), 1, p.getEnvDisplay())
 {
     for (auto* c : std::initializer_list<juce::Component*> { &oscA, &oscB, &subNoise, &filter, &env1, &env2 })
         addAndMakeVisible (c);
@@ -15,7 +15,7 @@ void WaveForgeEditor::OscPage::resized()
     auto r = getLocalBounds();
     const int gap = 6;
 
-    auto bottom = r.removeFromBottom (186);
+    auto bottom = r.removeFromBottom (216);
     r.removeFromBottom (gap);
 
     auto oscs = r;
@@ -25,7 +25,7 @@ void WaveForgeEditor::OscPage::resized()
     oscB.setBounds (oscs);
 
     // bottom row: sub/noise | filter (knobs + response view) | env1 | env2  (weights)
-    const float weights[4] = { 1.0f, 2.4f, 0.95f, 0.95f };
+    const float weights[4] = { 0.95f, 2.2f, 1.05f, 1.05f };
     float total = 0.0f;
     for (float w : weights) total += w;
     const int usable = bottom.getWidth() - gap * 3;

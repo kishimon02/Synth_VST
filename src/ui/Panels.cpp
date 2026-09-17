@@ -219,13 +219,15 @@ void FilterPanel::resized()
 }
 
 //==============================================================================
-EnvPanel::EnvPanel (Apvts& a, int index)
+EnvPanel::EnvPanel (Apvts& a, int index, const wf::EnvDisplay& live)
     : Panel (index == 0 ? "ENV 1  (amp)" : "ENV 2  (mod)", colours::accentMod),
+      view (a, index, live, colours::accentMod),
       attack  (a, ParamID::env (index).attack,  "Attack",  colours::accentMod),
       decay   (a, ParamID::env (index).decay,   "Decay",   colours::accentMod),
       sustain (a, ParamID::env (index).sustain, "Sustain", colours::accentMod),
       release (a, ParamID::env (index).release, "Release", colours::accentMod)
 {
+    addAndMakeVisible (view);
     for (auto* c : { &attack, &decay, &sustain, &release })
         addAndMakeVisible (c);
 }
@@ -233,7 +235,9 @@ EnvPanel::EnvPanel (Apvts& a, int index)
 void EnvPanel::resized()
 {
     auto r = body();
-    row (r.removeFromTop (knobRow), { &attack, &decay, &sustain, &release });
+    row (r.removeFromBottom (knobRow), { &attack, &decay, &sustain, &release });
+    r.removeFromBottom (4);
+    view.setBounds (r);
 }
 
 //==============================================================================

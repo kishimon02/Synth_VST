@@ -49,6 +49,7 @@ public:
     juce::MidiKeyboardState& getKeyboardState() noexcept { return keyboardState; }
     WavetableBank& getBank() noexcept { return bank; }
     const ui::ScopeBuffer& getScopeBuffer() const noexcept { return scope; }
+    const wf::EnvDisplay& getEnvDisplay() const noexcept { return engine.getEnvDisplay(); }
 
     int  getOscTableIndex (int osc) const noexcept { return oscTableIndex[osc]; }
     const wf::Wavetable* getOscTable (int osc) const noexcept { return oscTable[osc].load (std::memory_order_relaxed); }

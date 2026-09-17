@@ -6,6 +6,16 @@
 namespace wf
 {
 
+// Snapshot of the newest sounding voice for the envelope displays, written
+// by the audio thread once per block, read by the UI timer.
+struct EnvDisplay
+{
+    std::atomic<bool>  active { false };
+    std::atomic<float> heldMs { 0.0f };       // time since note-on
+    std::atomic<float> releaseMs { -1.0f };   // time since note-off, -1 while held
+    std::atomic<float> level[2] { 0.0f, 0.0f };
+};
+
 // Voice allocation and MIDI handling. All voices are pre-allocated; nothing
 // here allocates or locks on the audio thread.
 class SynthEngine
@@ -25,6 +35,7 @@ public:
     float getModWheel() const noexcept   { return modWheel; }
     float getAftertouch() const noexcept { return aftertouch; }
     float getGlobalLfoPhase (int index) const noexcept { return globalLfoPhase[(size_t) index]; }
+    const EnvDisplay& getEnvDisplay() const noexcept { return envDisplay; }
 
 private:
     void handleMidi (const juce::MidiMessage& m, const SynthParams& p);
@@ -45,6 +56,7 @@ private:
     // note-on and then advance at the same rate, so they stay locked.
     double sampleRate = 44100.0;
     std::array<float, 2> globalLfoPhase { 0.0f, 0.0f };
+    EnvDisplay envDisplay;
 };
 
 } // namespace wf
