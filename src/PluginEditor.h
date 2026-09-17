@@ -41,7 +41,6 @@ private:
         ui::SubNoisePanel subNoise;
         ui::FilterPanel filter;
         ui::EnvPanel env1, env2;
-        ui::GlobalPanel global;
     };
 
     struct ModPage final : public juce::Component
@@ -56,6 +55,7 @@ private:
     ui::WaveForgeLookAndFeel lookAndFeel;
 
     juce::Label title, status;
+    ui::GlobalPanel  global;
     juce::Label      presetLabel { {}, "Preset" };
     juce::ComboBox   presetBox;
     juce::TextButton savePresetButton { "Save As..." };

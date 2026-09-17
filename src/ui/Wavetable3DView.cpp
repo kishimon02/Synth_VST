@@ -17,9 +17,7 @@ void Wavetable3DView::setTable (const wf::Wavetable* table)
 
 void Wavetable3DView::setPosition (float pos01)
 {
-    position.store (pos01, std::memory_order_relaxed);
-    if (displayedTable != nullptr)
-        setHighlightLine (juce::roundToInt (pos01 * (float) (displayedTable->getNumFrames() - 1)));
+    position.store (pos01, std::memory_order_relaxed);   // the overlay line follows it
 }
 
 void Wavetable3DView::setMode (Mode m)
@@ -44,25 +42,68 @@ bool Wavetable3DView::buildVertices (std::vector<float>& verts, int& numLines, i
     if (table == nullptr)
         return false;
 
-    numLines = table->getNumFrames();
+    const int frames = table->getNumFrames();
+    numLines = frames > 1 ? juce::jmax (frames, minLines) : 1;
     pointsPerLine = pointsPerFrame;
     verts.resize ((size_t) numLines * pointsPerFrame * 3);
 
-    // x: sample position, y: amplitude, z: frame depth (front = frame 0)
-    const int step = wf::Wavetable::frameSize / pointsPerFrame;
+    // x: sample position, y: amplitude, z: depth (front = frame 0). Lines
+    // between frames are interpolated exactly like the oscillator does.
+    std::vector<float> frame;
     size_t k = 0;
-    for (int f = 0; f < numLines; ++f)
+    for (int line = 0; line < numLines; ++line)
     {
-        const float* raw = table->getRawFrame (f);
-        const float z = numLines > 1 ? -1.0f + 2.0f * (float) f / (float) (numLines - 1) : 0.0f;
+        const float pos = numLines > 1 ? (float) line / (float) (numLines - 1) : 0.0f;
+        interpolatedFrame (*table, pos, frame);
+        const float z = -1.0f + 2.0f * pos;
         for (int i = 0; i < pointsPerFrame; ++i)
         {
             verts[k++] = -1.0f + 2.0f * (float) i / (float) (pointsPerFrame - 1);
-            verts[k++] = juce::jlimit (-1.0f, 1.0f, raw[i * step]) * 0.4f;
+            verts[k++] = frame[(size_t) i] * 0.4f;
             verts[k++] = z;
         }
     }
     return true;
+}
+
+bool Wavetable3DView::buildOverlayLine (std::vector<float>& verts, int& points)
+{
+    const auto* table = pendingTable.load (std::memory_order_acquire);
+    if (table == nullptr)
+        return false;
+    const float pos = position.load();
+    std::vector<float> frame;
+    interpolatedFrame (*table, pos, frame);
+    points = pointsPerFrame;
+    verts.resize ((size_t) points * 3);
+    const float z = table->getNumFrames() > 1 ? -1.0f + 2.0f * pos : 0.0f;
+    size_t k = 0;
+    for (int i = 0; i < points; ++i)
+    {
+        verts[k++] = -1.0f + 2.0f * (float) i / (float) (points - 1);
+        verts[k++] = frame[(size_t) i] * 0.4f;
+        verts[k++] = z;
+    }
+    return true;
+}
+
+// `out` gets pointsPerFrame samples (clamped to +-1) of the frame at pos01.
+void Wavetable3DView::interpolatedFrame (const wf::Wavetable& t, float pos01, std::vector<float>& out)
+{
+    const int frames = t.getNumFrames();
+    const float p = juce::jlimit (0.0f, 1.0f, pos01) * (float) juce::jmax (0, frames - 1);
+    const int f0 = juce::jlimit (0, frames - 1, (int) p);
+    const int f1 = juce::jmin (f0 + 1, frames - 1);
+    const float mix = p - (float) f0;
+    const float* a = t.getRawFrame (f0);
+    const float* b = t.getRawFrame (f1);
+    const int step = wf::Wavetable::frameSize / pointsPerFrame;
+    out.resize ((size_t) pointsPerFrame);
+    for (int i = 0; i < pointsPerFrame; ++i)
+    {
+        const int s = i * step;
+        out[(size_t) i] = juce::jlimit (-1.0f, 1.0f, a[s] + (b[s] - a[s]) * mix);
+    }
 }
 
 void Wavetable3DView::currentFrameSamples (std::vector<float>& out) const

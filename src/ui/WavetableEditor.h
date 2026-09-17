@@ -21,9 +21,27 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;   // Ctrl+Z / Ctrl+Y
+
+    // Call before changing the model. Single-frame edits snapshot only that
+    // frame; structural edits (add / delete / morph) snapshot the table.
+    void pushUndo (bool wholeTable);
+    void undo();
+    void redo();
 
 private:
     static constexpr int N = wf::Wavetable::frameSize;
+    static constexpr size_t maxUndo = 64;
+
+    struct Snapshot
+    {
+        int frameIndex = -1;          // -1 = whole table
+        std::vector<float> data;
+        int numFrames = 1, current = 0;
+    };
+    Snapshot captureState (bool wholeTable) const;
+    void restoreState (Snapshot& s);   // swaps, so the same snapshot becomes the redo entry
+    std::vector<Snapshot> undoStack, redoStack;
 
     // --- model
     float* frame (int index) noexcept { return frames.data() + (size_t) index * N; }
@@ -56,7 +74,7 @@ private:
         explicit HarmonicCanvas (WavetableEditor& e) : editor (e) {}
         static constexpr int shown = 64;
         void paint (juce::Graphics&) override;
-        void mouseDown (const juce::MouseEvent& e) override { mouseDrag (e); }
+        void mouseDown (const juce::MouseEvent& e) override;
         void mouseDrag (const juce::MouseEvent&) override;
     private:
         WavetableEditor& editor;
@@ -83,6 +101,7 @@ private:
     juce::TextEditor nameEditor;
     juce::TextButton prevButton { "<" }, nextButton { ">" }, addButton { "Add" }, dupButton { "Dup" },
                      delButton { "Del" }, morphButton { "Morph 1->N" };
+    juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
     juce::TextButton sineButton { "Sine" }, triButton { "Tri" }, sawButton { "Saw" }, squareButton { "Square" },
                      pulseButton { "Pulse" };
     juce::TextButton normButton { "Normalize" }, invertButton { "Invert" }, reverseButton { "Reverse" },

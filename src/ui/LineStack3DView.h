@@ -46,6 +46,10 @@ protected:
     virtual bool buildVertices (std::vector<float>& verts, int& numLines, int& pointsPerLine) = 0;
     virtual bool refillEveryFrame() const { return false; }
 
+    // GL thread, every frame: an optional extra line (e.g. the interpolated
+    // current frame) drawn last in white. Cheap because it is one line.
+    virtual bool buildOverlayLine (std::vector<float>& /*verts*/, int& /*points*/) { return false; }
+
     // GL thread: colour for a non-highlighted line (t = 0 front .. 1 back).
     virtual juce::Colour lineColour (int line, int numLines) const;
     virtual float lineWidthFor (int /*line*/) const { return 1.0f; }
@@ -68,8 +72,8 @@ private:
     std::unique_ptr<juce::OpenGLShaderProgram> shader;
     std::unique_ptr<juce::OpenGLShaderProgram::Uniform> projectionUniform, viewUniform, colourUniform;
     std::unique_ptr<juce::OpenGLShaderProgram::Attribute> positionAttribute;
-    GLuint vbo = 0, vao = 0;
-    std::vector<float> vertexScratch;
+    GLuint vbo = 0, vao = 0, overlayVbo = 0;
+    std::vector<float> vertexScratch, overlayScratch;
     int numLines = 0, pointsPerLine = 0;
 
     std::atomic<bool> dirty { true }, glReady { false }, glEnabled { true };

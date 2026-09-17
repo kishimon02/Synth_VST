@@ -8,7 +8,9 @@ namespace ui
 {
 
 // Serum-style wavetable view. Three modes:
-//   3D       every frame as a polyline stacked in depth (OpenGL)
+//   3D       the table as a dense sheet of polylines (frames interpolated up
+//            to minLines so a 16-frame table still reads as a surface), the
+//            interpolated frame under the WT position drawn on top in white
 //   2D       the frame under the WT position, interpolated, full width
 //   Spectrum harmonic magnitudes of that frame as bars
 class Wavetable3DView final : public LineStack3DView
@@ -25,9 +27,12 @@ public:
     Mode getMode() const noexcept { return mode; }
 
     static constexpr int pointsPerFrame = 512;
+    static constexpr int minLines = 128;
 
 private:
     bool buildVertices (std::vector<float>& verts, int& numLines, int& pointsPerLine) override;
+    bool buildOverlayLine (std::vector<float>& verts, int& points) override;
+    static void interpolatedFrame (const wf::Wavetable& t, float pos01, std::vector<float>& out);
     void paintFallback (juce::Graphics&) override;
     void paintOverlay (juce::Graphics&) override;
     void timerTick() override;

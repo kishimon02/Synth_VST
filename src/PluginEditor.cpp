@@ -4,9 +4,9 @@
 WaveForgeEditor::OscPage::OscPage (WaveForgeProcessor& p)
     : oscA (p, 0), oscB (p, 1),
       subNoise (p.getAPVTS()), filter (p.getAPVTS()),
-      env1 (p.getAPVTS(), 0), env2 (p.getAPVTS(), 1), global (p.getAPVTS())
+      env1 (p.getAPVTS(), 0), env2 (p.getAPVTS(), 1)
 {
-    for (auto* c : std::initializer_list<juce::Component*> { &oscA, &oscB, &subNoise, &filter, &env1, &env2, &global })
+    for (auto* c : std::initializer_list<juce::Component*> { &oscA, &oscB, &subNoise, &filter, &env1, &env2 })
         addAndMakeVisible (c);
 }
 
@@ -24,15 +24,15 @@ void WaveForgeEditor::OscPage::resized()
     oscs.removeFromLeft (gap);
     oscB.setBounds (oscs);
 
-    // bottom row: sub/noise | filter | env1 | env2 | global  (weights)
-    const float weights[5] = { 1.1f, 1.75f, 0.9f, 0.9f, 0.7f };
+    // bottom row: sub/noise | filter (knobs + response view) | env1 | env2  (weights)
+    const float weights[4] = { 1.0f, 2.4f, 0.95f, 0.95f };
     float total = 0.0f;
     for (float w : weights) total += w;
-    const int usable = bottom.getWidth() - gap * 4;
-    juce::Component* comps[5] = { &subNoise, &filter, &env1, &env2, &global };
-    for (int i = 0; i < 5; ++i)
+    const int usable = bottom.getWidth() - gap * 3;
+    juce::Component* comps[4] = { &subNoise, &filter, &env1, &env2 };
+    for (int i = 0; i < 4; ++i)
     {
-        const int w = i == 4 ? bottom.getWidth() : (int) ((float) usable * weights[i] / total);
+        const int w = i == 3 ? bottom.getWidth() : (int) ((float) usable * weights[i] / total);
         comps[i]->setBounds (bottom.removeFromLeft (w));
         bottom.removeFromLeft (gap);
     }
@@ -61,6 +61,7 @@ void WaveForgeEditor::ModPage::resized()
 WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     : AudioProcessorEditor (p),
       processor (p),
+      global (p.getAPVTS()),
       oscPage (p), modPage (p.getAPVTS()), fxPage (p.getAPVTS()),
       scopePage (p.getScopeBuffer(), [&p] { return p.getCurrentSampleRate(); }),
       scope (p.getScopeBuffer()),
@@ -76,6 +77,7 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     status.setFont (juce::FontOptions (12.0f));
     status.setColour (juce::Label::textColourId, ui::colours::textDim);
     addAndMakeVisible (status);
+    addAndMakeVisible (global);
 
     presetLabel.setJustificationType (juce::Justification::centredRight);
     presetLabel.setColour (juce::Label::textColourId, ui::colours::textDim);
@@ -241,14 +243,16 @@ void WaveForgeEditor::resized()
 {
     auto area = getLocalBounds().reduced (8);
 
-    auto top = area.removeFromTop (30);
-    auto presetArea = top.removeFromRight (juce::jmin (460, top.getWidth() / 2));
-    loadPresetButton.setBounds (presetArea.removeFromRight (78).reduced (2, 2));
-    savePresetButton.setBounds (presetArea.removeFromRight (88).reduced (2, 2));
+    auto top = area.removeFromTop (60);
+    const int presetWidth = juce::jmin (440, top.getWidth() * 2 / 5);
+    auto presetArea = top.removeFromRight (presetWidth).withSizeKeepingCentre (presetWidth, 26);
+    loadPresetButton.setBounds (presetArea.removeFromRight (78).reduced (2, 1));
+    savePresetButton.setBounds (presetArea.removeFromRight (88).reduced (2, 1));
     presetLabel.setBounds (presetArea.removeFromLeft (52));
-    presetBox.setBounds (presetArea.reduced (2, 3));
-    title.setBounds (top.removeFromLeft (120));
-    status.setBounds (top);
+    presetBox.setBounds (presetArea.reduced (2, 1));
+    global.setBounds (top.removeFromRight (210));
+    title.setBounds (top.removeFromLeft (120).withSizeKeepingCentre (120, 26));
+    status.setBounds (top.withSizeKeepingCentre (top.getWidth(), 26));
 
     area.removeFromTop (4);
     auto footer = area.removeFromBottom (86);

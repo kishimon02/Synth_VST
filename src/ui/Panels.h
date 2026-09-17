@@ -2,6 +2,7 @@
 
 #include "Controls.h"
 #include "Wavetable3DView.h"
+#include "FilterView.h"
 #include "../PluginProcessor.h"
 
 // One panel per synth section. Each owns its parameter widgets; the editor
@@ -55,8 +56,11 @@ public:
     explicit FilterPanel (Apvts&);
     void resized() override;
 private:
+    void setViewMode (FilterView::Mode);
     ParamToggle enabled; ParamCombo type; ParamKnob cutoff, resonance, drive, keyTrack, env2Amount;
     ParamToggle routeA, routeB, routeSub, routeNoise;
+    FilterView view;
+    juce::TextButton mode3DButton { "3D" }, mode2DButton { "2D" };
 };
 
 class EnvPanel final : public Panel
@@ -68,7 +72,8 @@ private:
     ParamKnob attack, decay, sustain, release;
 };
 
-class GlobalPanel final : public Panel
+// Master / voices / bend range as a frameless strip for the editor header.
+class GlobalPanel final : public juce::Component
 {
 public:
     explicit GlobalPanel (Apvts&);

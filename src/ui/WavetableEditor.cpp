@@ -32,8 +32,8 @@ WavetableEditor::WavetableEditor (WaveForgeProcessor& p, int oscIndex)
     title.setColour (juce::Label::textColourId, osc == 0 ? colours::accent : colours::accentB);
     addAndMakeVisible (title);
 
-    hint.setText ("Drag in the wave to draw (Shift = straight line). Drag the bars to set harmonics. "
-                  "Click the strip to pick a frame.", juce::dontSendNotification);
+    hint.setText ("Drag the wave to draw (Shift = line), drag the bars to set harmonics, click the strip to pick a frame. "
+                  "Ctrl+Z / Ctrl+Y undo / redo.", juce::dontSendNotification);
     hint.setColour (juce::Label::textColourId, colours::textDim);
     hint.setFont (juce::FontOptions (11.5f));
     addAndMakeVisible (hint);
@@ -60,9 +60,12 @@ WavetableEditor::WavetableEditor (WaveForgeProcessor& p, int oscIndex)
 
     button (prevButton, [this] { selectFrame (current - 1); });
     button (nextButton, [this] { selectFrame (current + 1); });
+    button (undoButton, [this] { undo(); });
+    button (redoButton, [this] { redo(); });
     button (addButton, [this]
     {
         if (numFrames >= wf::Wavetable::maxFrames) return;
+        pushUndo (true);
         frames.insert (frames.begin() + (size_t) (current + 1) * N, (size_t) N, 0.0f);
         ++numFrames;
         selectFrame (current + 1);
@@ -71,6 +74,7 @@ WavetableEditor::WavetableEditor (WaveForgeProcessor& p, int oscIndex)
     button (dupButton, [this]
     {
         if (numFrames >= wf::Wavetable::maxFrames) return;
+        pushUndo (true);
         std::vector<float> copy (frame (current), frame (current) + N);
         frames.insert (frames.begin() + (size_t) (current + 1) * N, copy.begin(), copy.end());
         ++numFrames;
@@ -80,6 +84,7 @@ WavetableEditor::WavetableEditor (WaveForgeProcessor& p, int oscIndex)
     button (delButton, [this]
     {
         if (numFrames <= 1) return;
+        pushUndo (true);
         frames.erase (frames.begin() + (size_t) current * N, frames.begin() + (size_t) (current + 1) * N);
         --numFrames;
         selectFrame (juce::jmin (current, numFrames - 1));
@@ -87,6 +92,7 @@ WavetableEditor::WavetableEditor (WaveForgeProcessor& p, int oscIndex)
     });
     button (morphButton, [this]
     {
+        pushUndo (true);
         Ops::morph (frames.data(), numFrames, 0, numFrames - 1);
         frameEdited();
         status.setText ("Morphed frames 1 -> " + juce::String (numFrames), juce::dontSendNotification);
@@ -94,18 +100,19 @@ WavetableEditor::WavetableEditor (WaveForgeProcessor& p, int oscIndex)
 
     auto shape = [this] (juce::TextButton& b, const char* name)
     {
-        b.onClick = [this, name] { wf::WavetableLoader::basicShape (name, frame (current)); frameEdited(); };
+        b.onClick = [this, name] { pushUndo (false); wf::WavetableLoader::basicShape (name, frame (current)); frameEdited(); };
         addAndMakeVisible (b);
     };
     shape (sineButton, "Sine"); shape (triButton, "Triangle"); shape (sawButton, "Saw");
     shape (squareButton, "Square"); shape (pulseButton, "Pulse");
 
-    button (normButton,    [this] { Ops::normalise (frame (current)); frameEdited(); });
-    button (invertButton,  [this] { Ops::invert (frame (current)); frameEdited(); });
-    button (reverseButton, [this] { Ops::reverse (frame (current)); frameEdited(); });
-    button (dcButton,      [this] { Ops::removeDc (frame (current)); frameEdited(); });
-    button (smoothButton,  [this] { Ops::smooth (frame (current)); frameEdited(); });
-    button (clearButton,   [this] { std::fill_n (frame (current), N, 0.0f); frameEdited(); });
+    button (normButton,    [this] { pushUndo (false); Ops::normalise (frame (current)); frameEdited(); });
+    button (invertButton,  [this] { pushUndo (false); Ops::invert (frame (current)); frameEdited(); });
+    button (reverseButton, [this] { pushUndo (false); Ops::reverse (frame (current)); frameEdited(); });
+    button (dcButton,      [this] { pushUndo (false); Ops::removeDc (frame (current)); frameEdited(); });
+    button (smoothButton,  [this] { pushUndo (false); Ops::smooth (frame (current)); frameEdited(); });
+    button (clearButton,   [this] { pushUndo (false); std::fill_n (frame (current), N, 0.0f); frameEdited(); });
+    setWantsKeyboardFocus (true);
 
     button (applyButton, [this] { applyToOsc(); });
     button (saveButton,  [this] { saveAs(); });
@@ -117,6 +124,89 @@ WavetableEditor::WavetableEditor (WaveForgeProcessor& p, int oscIndex)
     addAndMakeVisible (strip);
 
     selectFrame (0);
+}
+
+//==============================================================================
+WavetableEditor::Snapshot WavetableEditor::captureState (bool wholeTable) const
+{
+    Snapshot s;
+    s.numFrames = numFrames;
+    s.current = current;
+    if (wholeTable)
+    {
+        s.frameIndex = -1;
+        s.data = frames;
+    }
+    else
+    {
+        s.frameIndex = current;
+        s.data.assign (frame (current), frame (current) + N);
+    }
+    return s;
+}
+
+void WavetableEditor::restoreState (Snapshot& s)
+{
+    if (s.frameIndex < 0)
+    {
+        std::swap (frames, s.data);
+        std::swap (numFrames, s.numFrames);
+        std::swap (current, s.current);
+        s.frameIndex = -1;
+    }
+    else
+    {
+        const int f = juce::jlimit (0, numFrames - 1, s.frameIndex);
+        std::vector<float> old (frame (f), frame (f) + N);
+        std::copy (s.data.begin(), s.data.end(), frame (f));
+        s.data = std::move (old);
+        current = f;
+    }
+    selectFrame (current);
+}
+
+void WavetableEditor::pushUndo (bool wholeTable)
+{
+    undoStack.push_back (captureState (wholeTable));
+    if (undoStack.size() > maxUndo)
+        undoStack.erase (undoStack.begin());
+    redoStack.clear();
+    refreshLabels();
+}
+
+void WavetableEditor::undo()
+{
+    if (undoStack.empty()) return;
+    Snapshot s = std::move (undoStack.back());
+    undoStack.pop_back();
+    restoreState (s);            // s now holds the state we just left
+    redoStack.push_back (std::move (s));
+    refreshLabels();
+}
+
+void WavetableEditor::redo()
+{
+    if (redoStack.empty()) return;
+    Snapshot s = std::move (redoStack.back());
+    redoStack.pop_back();
+    restoreState (s);
+    undoStack.push_back (std::move (s));
+    refreshLabels();
+}
+
+bool WavetableEditor::keyPressed (const juce::KeyPress& key)
+{
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'Z')
+    {
+        if (key.getModifiers().isShiftDown()) redo(); else undo();
+        return true;
+    }
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'Y')
+    {
+        redo();
+        return true;
+    }
+    return false;
 }
 
 //==============================================================================
@@ -148,6 +238,8 @@ void WavetableEditor::harmonicsEdited()
 void WavetableEditor::refreshLabels()
 {
     frameLabel.setText ("Frame " + juce::String (current + 1) + " / " + juce::String (numFrames), juce::dontSendNotification);
+    undoButton.setEnabled (! undoStack.empty());
+    redoButton.setEnabled (! redoStack.empty());
     delButton.setEnabled (numFrames > 1);
     addButton.setEnabled (numFrames < wf::Wavetable::maxFrames);
     dupButton.setEnabled (numFrames < wf::Wavetable::maxFrames);
@@ -225,6 +317,9 @@ void WavetableEditor::resized()
     for (auto* b : { &addButton, &dupButton, &delButton })
         b->setBounds (row1.removeFromLeft (52).reduced (2, 1));
     morphButton.setBounds (row1.removeFromLeft (100).reduced (2, 1));
+    row1.removeFromLeft (8);
+    undoButton.setBounds (row1.removeFromLeft (56).reduced (2, 1));
+    redoButton.setBounds (row1.removeFromLeft (56).reduced (2, 1));
     row1.removeFromLeft (10);
     hint.setBounds (row1);
 
@@ -298,6 +393,8 @@ void WavetableEditor::WaveCanvas::drawTo (juce::Point<float> pt, bool first)
 
 void WavetableEditor::WaveCanvas::mouseDown (const juce::MouseEvent& e)
 {
+    editor.grabKeyboardFocus();
+    editor.pushUndo (false);     // one undo step per stroke
     lastIndex = -1;
     lineStart = e.position;
     drawTo (e.position, true);
@@ -339,6 +436,13 @@ void WavetableEditor::HarmonicCanvas::paint (juce::Graphics& g)
                     juce::Justification::centred);
     g.setColour (colours::panelEdge);
     g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+}
+
+void WavetableEditor::HarmonicCanvas::mouseDown (const juce::MouseEvent& e)
+{
+    editor.grabKeyboardFocus();
+    editor.pushUndo (false);
+    mouseDrag (e);
 }
 
 void WavetableEditor::HarmonicCanvas::mouseDrag (const juce::MouseEvent& e)

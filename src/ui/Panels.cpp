@@ -179,16 +179,39 @@ FilterPanel::FilterPanel (Apvts& a)
       drive (a, ParamID::filterDrive, "Drive"), keyTrack (a, ParamID::filterKeyTrack, "Key Trk"),
       env2Amount (a, ParamID::filterEnv2Amount, "Env2"),
       routeA (a, ParamID::filterRouteA, "A"), routeB (a, ParamID::filterRouteB, "B"),
-      routeSub (a, ParamID::filterRouteSub, "Sub"), routeNoise (a, ParamID::filterRouteNoise, "Noise")
+      routeSub (a, ParamID::filterRouteSub, "Sub"), routeNoise (a, ParamID::filterRouteNoise, "Noise"),
+      view (a)
 {
     for (auto* c : std::initializer_list<juce::Component*> { &enabled, &type, &cutoff, &resonance, &drive, &keyTrack,
-                                                            &env2Amount, &routeA, &routeB, &routeSub, &routeNoise })
+                                                            &env2Amount, &routeA, &routeB, &routeSub, &routeNoise, &view })
         addAndMakeVisible (c);
+
+    mode3DButton.onClick = [this] { setViewMode (FilterView::mode3D); };
+    mode2DButton.onClick = [this] { setViewMode (FilterView::mode2D); };
+    addAndMakeVisible (mode3DButton);
+    addAndMakeVisible (mode2DButton);
+    setViewMode (FilterView::mode2D);
+}
+
+void FilterPanel::setViewMode (FilterView::Mode m)
+{
+    view.setMode (m);
+    mode3DButton.setToggleState (m == FilterView::mode3D, juce::dontSendNotification);
+    mode2DButton.setToggleState (m == FilterView::mode2D, juce::dontSendNotification);
 }
 
 void FilterPanel::resized()
 {
-    auto r = body();
+    auto r = getLocalBounds().reduced (8, 4);
+    auto header = r.removeFromTop (titleHeight);
+    title.setBounds (header.removeFromLeft (70));
+    mode2DButton.setBounds (header.removeFromRight (30).reduced (1, 2));
+    mode3DButton.setBounds (header.removeFromRight (30).reduced (1, 2));
+
+    auto viewArea = r.removeFromRight (juce::jmax (150, r.getWidth() * 38 / 100));
+    r.removeFromRight (6);
+    view.setBounds (viewArea.withTrimmedBottom (6).withTrimmedTop (2));
+
     row (r.removeFromTop (knobRow), { &enabled, &type, &cutoff, &resonance, &drive }, { 0.7f, 1.3f, 1.0f, 1.0f, 1.0f });
     r.removeFromTop (4);
     row (r.removeFromTop (knobRow), { &keyTrack, &env2Amount, &routeA, &routeB, &routeSub, &routeNoise },
@@ -215,8 +238,7 @@ void EnvPanel::resized()
 
 //==============================================================================
 GlobalPanel::GlobalPanel (Apvts& a)
-    : Panel ("GLOBAL"),
-      master (a, ParamID::masterVolume, "Master"), polyphony (a, ParamID::polyphony, "Voices"),
+    : master (a, ParamID::masterVolume, "Master"), polyphony (a, ParamID::polyphony, "Voices"),
       bendRange (a, ParamID::pitchBendRange, "Bend")
 {
     for (auto* c : { &master, &polyphony, &bendRange })
@@ -225,8 +247,7 @@ GlobalPanel::GlobalPanel (Apvts& a)
 
 void GlobalPanel::resized()
 {
-    auto r = body();
-    row (r.removeFromTop (knobRow), { &master, &polyphony, &bendRange });
+    Panel::row (getLocalBounds(), { &master, &polyphony, &bendRange });
 }
 
 //==============================================================================

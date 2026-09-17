@@ -98,6 +98,7 @@ void LineStack3DView::newOpenGLContextCreated()
         glBindVertexArray (vao);
     }
     glGenBuffers (1, &vbo);
+    glGenBuffers (1, &overlayVbo);
     numLines = pointsPerLine = 0;
     dirty.store (true);
     glReady.store (true);
@@ -110,6 +111,7 @@ void LineStack3DView::openGLContextClosing()
     projectionUniform.reset(); viewUniform.reset(); colourUniform.reset();
     shader.reset();
     if (vbo != 0) { glDeleteBuffers (1, &vbo); vbo = 0; }
+    if (overlayVbo != 0) { glDeleteBuffers (1, &overlayVbo); overlayVbo = 0; }
     if (vao != 0 && glDeleteVertexArrays != nullptr) { glDeleteVertexArrays (1, &vao); vao = 0; }
 }
 
@@ -176,6 +178,18 @@ void LineStack3DView::renderOpenGL()
         glLineWidth (2.5f);
         colourUniform->set (1.0f, 1.0f, 1.0f, 1.0f);
         glDrawArrays (GL_LINE_STRIP, highlight * pointsPerLine, pointsPerLine);
+    }
+
+    int overlayPoints = 0;
+    if (buildOverlayLine (overlayScratch, overlayPoints) && overlayPoints > 1)
+    {
+        glBindBuffer (GL_ARRAY_BUFFER, overlayVbo);
+        glBufferData (GL_ARRAY_BUFFER, (GLsizeiptr) ((size_t) overlayPoints * 3 * sizeof (float)),
+                      overlayScratch.data(), GL_DYNAMIC_DRAW);
+        glVertexAttribPointer ((GLuint) positionAttribute->attributeID, 3, GL_FLOAT, GL_FALSE, 3 * sizeof (float), nullptr);
+        glLineWidth (2.5f);
+        colourUniform->set (1.0f, 1.0f, 1.0f, 1.0f);
+        glDrawArrays (GL_LINE_STRIP, 0, overlayPoints);
     }
     glLineWidth (1.0f);
 
