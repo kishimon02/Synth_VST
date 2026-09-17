@@ -17,6 +17,7 @@
 #include "dsp/fx/FxChain.h"
 #include "dsp/WaveEditOps.h"
 #include "dsp/Arpeggiator.h"
+#include "dsp/OutputGuard.h"
 #include "ai/Settings.h"
 #include "ai/LlmClient.h"
 #include "ai/ParamCatalog.h"
@@ -29,6 +30,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 namespace
 {
@@ -1480,6 +1482,232 @@ public:
     }
 };
 
+// How long the soak test renders. Default is a quick pass; `--soak <minutes>`
+// on the command line runs the long one used before tagging a release.
+static double soakMinutes = 0.5;
+
+struct OutputGuardTest final : public juce::UnitTest
+{
+    OutputGuardTest() : juce::UnitTest ("Output guard", "DSP") {}
+
+    void runTest() override
+    {
+        wf::OutputGuard guard;
+        juce::AudioBuffer<float> buf (2, 8);
+
+        beginTest ("normal levels pass through untouched");
+        {
+            const float values[] = { 0.0f, 0.25f, -0.5f, 0.999f, -1.0f, 1.0f, 0.1f, -0.1f };
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < 8; ++i)
+                    buf.setSample (ch, i, values[i]);
+
+            expect (! guard.process (buf, 8), "nothing to trip on");
+            for (int i = 0; i < 8; ++i)
+                expectEquals (buf.getSample (0, i), values[i], "bit identical below 0 dBFS");
+            expectEquals (guard.tripCount(), 0);
+        }
+
+        beginTest ("anything past 0 dBFS bends instead of running away");
+        {
+            const float values[] = { 1.5f, 3.0f, 50.0f, -1.5f, -50.0f, 1.0001f, 2.0f, -2.0f };
+            for (int i = 0; i < 8; ++i)
+                buf.setSample (0, i, values[i]);
+            buf.clear (1, 0, 8);
+
+            expect (! guard.process (buf, 8), "loud is not broken");
+            for (int i = 0; i < 8; ++i)
+            {
+                const float out = buf.getSample (0, i);
+                expect (std::abs (out) <= 2.0f, "clipped to the ceiling");
+                expect (out * values[i] > 0.0f, "sign kept");
+                expect (std::abs (out) >= 1.0f, "still loud");
+            }
+            expectEquals (guard.tripCount(), 0);
+        }
+
+        beginTest ("one NaN or Inf silences the block and asks for a reset");
+        {
+            buf.clear();
+            for (int i = 0; i < 8; ++i)
+                buf.setSample (0, i, 0.5f);
+            buf.setSample (0, 5, std::numeric_limits<float>::quiet_NaN());
+
+            expect (guard.process (buf, 8), "trips");
+            expectEquals (buf.getMagnitude (0, 8), 0.0f, "block silenced");
+            expectEquals (guard.tripCount(), 1);
+
+            buf.setSample (1, 2, std::numeric_limits<float>::infinity());
+            expect (guard.process (buf, 8), "infinity trips too");
+            expectEquals (guard.tripCount(), 2);
+        }
+    }
+};
+
+// The long run that stands in for "play it in the DAW for half an hour": the
+// whole chain (arp -> voices -> FX -> guard) rendered while the block size,
+// tempo, notes and parameters change the way a session changes them.
+struct StabilityTest final : public juce::UnitTest
+{
+    StabilityTest() : juce::UnitTest ("Stability soak", "DSP") {}
+
+    void runTest() override
+    {
+        beginTest ("the chain survives " + juce::String (soakMinutes, 1) + " minutes of churn");
+
+        constexpr double sr = 48000.0;
+        constexpr int maxBlock = 1024;
+
+        std::vector<std::shared_ptr<wf::Wavetable>> tables;
+        for (const char* tableName : { "Basic Shapes", "Sine", "Harmonics" })
+            tables.push_back (wf::WavetableLoader::createBuiltin (tableName));
+
+        wf::SynthEngine engine;
+        wf::FxChain fx;
+        wf::Arpeggiator arp;
+        wf::OutputGuard guard;
+        engine.prepare (sr);
+        fx.prepare (sr, maxBlock);
+        arp.prepare (sr);
+
+        const auto& patterns = wf::ArpPattern::builtins();
+
+        wf::SynthParams p;
+        p.osc[0].table = tables[0].get();
+        p.osc[1].table = tables[1].get();
+        p.osc[1].enabled = true;
+        p.sub.enabled = true;
+        p.noise.enabled = true;
+        p.global.polyphony = 16;
+        p.fx.distortion.enabled = true;
+        p.fx.eq.enabled = true;
+        p.fx.chorus.enabled = true;
+        p.fx.delay.enabled = true;
+        p.fx.reverb.enabled = true;
+
+        juce::AudioBuffer<float> buf (2, maxBlock);
+        juce::MidiBuffer midi, arped;
+        juce::Random rng (20260918);
+
+        const double totalSamples = sr * 60.0 * soakMinutes;
+        double rendered = 0.0, ppq = 0.0;
+        int heldNotes[16], numHeld = 0, blocks = 0;
+        float peak = 0.0f;
+        bool finite = true, inRange = true;
+
+        const auto startTime = juce::Time::getMillisecondCounterHiRes();
+
+        while (rendered < totalSamples)
+        {
+            // Hosts change the block size (freeze, bounce, device switch) and
+            // are free to hand over a short block at any time.
+            const int block = rng.nextInt ({ 1, maxBlock + 1 });
+            buf.setSize (2, block, false, false, true);
+            buf.clear();
+            midi.clear();
+
+            // notes: played, held, released, and stacked past the voice limit
+            if (rng.nextFloat() < 0.35f && numHeld < 16)
+            {
+                const int note = rng.nextInt ({ 24, 100 });
+                midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) rng.nextInt ({ 1, 128 })),
+                               rng.nextInt (block));
+                heldNotes[numHeld++] = note;
+            }
+            if (rng.nextFloat() < 0.3f && numHeld > 0)
+            {
+                const int i = rng.nextInt (numHeld);
+                midi.addEvent (juce::MidiMessage::noteOff (1, heldNotes[i]), rng.nextInt (block));
+                heldNotes[i] = heldNotes[--numHeld];
+            }
+            if (rng.nextFloat() < 0.02f)
+            {
+                midi.addEvent (juce::MidiMessage::allNotesOff (1), 0);
+                numHeld = 0;
+            }
+            if (rng.nextFloat() < 0.1f)
+                midi.addEvent (juce::MidiMessage::pitchWheel (1, rng.nextInt (16384)), 0);
+            if (rng.nextFloat() < 0.1f)
+                midi.addEvent (juce::MidiMessage::controllerEvent (1, 1, rng.nextInt (128)), 0);
+            if (rng.nextFloat() < 0.05f)
+                midi.addEvent (juce::MidiMessage::controllerEvent (1, 64, rng.nextInt (128)), 0);
+
+            // parameters: knob turns, table swaps, tempo changes, FX settings
+            p.bpm = (float) rng.nextInt ({ 40, 220 });
+            p.osc[0].table = tables[(size_t) rng.nextInt ((int) tables.size())].get();
+            p.osc[0].wtPosition = rng.nextFloat();
+            p.osc[0].unisonVoices = rng.nextInt ({ 1, 9 });
+            p.osc[0].unisonDetune = rng.nextFloat() * 100.0f;
+            p.osc[0].warpMode = rng.nextInt (5);
+            p.osc[0].warpAmount = rng.nextFloat();
+            p.osc[1].octave = rng.nextInt ({ -3, 4 });
+            p.filter.type = rng.nextInt (5);
+            p.filter.cutoffHz = 20.0f + rng.nextFloat() * rng.nextFloat() * 19980.0f;
+            p.filter.resonance = rng.nextFloat();             // including self-oscillation
+            p.filter.drive = 1.0f + rng.nextFloat() * 9.0f;
+            p.filter.env2Amount = -96.0f + rng.nextFloat() * 192.0f;
+            p.env[0] = { rng.nextFloat() * 50.0f, rng.nextFloat() * 500.0f, rng.nextFloat(), rng.nextFloat() * 800.0f };
+            p.global.masterGain = juce::Decibels::decibelsToGain (rng.nextFloat() * 6.0f);
+
+            p.fx.distortion.driveDb = rng.nextFloat() * 40.0f;
+            p.fx.distortion.mode = rng.nextInt (3);
+            p.fx.distortion.oversample = rng.nextBool();
+            p.fx.chorus.feedback = -0.95f + rng.nextFloat() * 1.9f;
+            p.fx.delay.feedback = rng.nextFloat() * 0.95f;    // long tails on purpose
+            p.fx.delay.pingPong = rng.nextBool();
+            p.fx.reverb.size = rng.nextFloat();
+            p.fx.reverb.mix = rng.nextFloat();
+
+            p.arp.enabled = rng.nextFloat() < 0.5f;
+            p.arp.mode = rng.nextInt (wf::Arpeggiator::numModes);
+            p.arp.division = rng.nextInt (9);
+            p.arp.octaves = rng.nextInt ({ 1, 5 });
+            p.arp.gate = 0.05f + rng.nextFloat() * 0.95f;
+            p.arp.swing = rng.nextFloat() * 0.75f;
+            p.arp.latch = rng.nextFloat() < 0.2f;
+            p.arp.pattern = rng.nextBool() ? &patterns[(size_t) rng.nextInt ((int) patterns.size())] : nullptr;
+
+            // transport: playing, stopped, and jumping back to the loop start
+            const bool playing = rng.nextFloat() < 0.8f;
+            if (rng.nextFloat() < 0.03f)
+                ppq = 0.0;
+
+            arp.process (midi, arped, block, p.arp, p.bpm, playing ? ppq : -1.0);
+            engine.process (buf, arped, p);
+            fx.process (buf, p.fx, p.bpm);
+            buf.applyGain (p.global.masterGain);
+
+            if (guard.process (buf, block))
+                engine.reset();
+
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                const float* d = buf.getReadPointer (ch);
+                for (int i = 0; i < block; ++i)
+                {
+                    finite = finite && std::isfinite (d[i]);
+                    inRange = inRange && std::abs (d[i]) <= 2.0f;
+                    peak = juce::jmax (peak, std::abs (d[i]));
+                }
+            }
+
+            rendered += block;
+            ppq += (double) block / sr * p.bpm / 60.0;
+            ++blocks;
+        }
+
+        const auto elapsedMs = juce::Time::getMillisecondCounterHiRes() - startTime;
+        logMessage ("rendered " + juce::String (rendered / sr, 1) + " s of audio in "
+                    + juce::String (blocks) + " blocks, " + juce::String (elapsedMs / 1000.0, 1) + " s wall"
+                    + " (x" + juce::String (rendered / sr / juce::jmax (0.001, elapsedMs / 1000.0), 1) + " realtime)"
+                    + ", peak " + juce::String (peak, 3) + ", guard trips " + juce::String (guard.tripCount()));
+
+        expect (finite, "every sample finite");
+        expect (inRange, "every sample inside the guard's ceiling");
+        expectEquals (guard.tripCount(), 0, "nothing produced NaN / Inf");
+    }
+};
+
 struct StdoutRunner final : public juce::UnitTestRunner
 {
     void logMessage (const juce::String& m) override { std::cout << m << std::endl; }
@@ -1499,9 +1727,16 @@ static AiTest aiTest;
 static ChordLibraryTest chordLibraryTest;
 static ChatStoreTest chatStoreTest;
 static PresetTest presetTest;
+static OutputGuardTest outputGuardTest;
+static StabilityTest stabilityTest;
 
-int main()
+int main (int argc, char** argv)
 {
+    // --soak <minutes> renders the long stability pass instead of the short one.
+    for (int i = 1; i < argc; ++i)
+        if (juce::String (argv[i]) == "--soak" && i + 1 < argc)
+            soakMinutes = juce::jlimit (0.1, 120.0, juce::String (argv[i + 1]).getDoubleValue());
+
     StdoutRunner runner;
     runner.setAssertOnFailure (false);
     runner.runAllTests();

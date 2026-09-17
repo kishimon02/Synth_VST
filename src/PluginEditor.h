@@ -59,6 +59,7 @@ private:
     ui::WaveForgeLookAndFeel lookAndFeel;
 
     juce::Label title, status;
+    juce::TextButton panicButton { "Panic" };
     ui::GlobalPanel  global;
     juce::Label      presetLabel { {}, "Preset" };
     juce::ComboBox   presetBox;

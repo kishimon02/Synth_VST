@@ -30,7 +30,7 @@ public:
     static constexpr int minLines = 128;
 
 private:
-    bool buildVertices (std::vector<float>& verts, int& numLines, int& pointsPerLine) override;
+    bool buildVertices (std::vector<float>& verts, int& outLines, int& outPoints) override;
     bool buildOverlayLine (std::vector<float>& verts, int& points) override;
     static void interpolatedFrame (const wf::Wavetable& t, float pos01, std::vector<float>& out);
     void paintFallback (juce::Graphics&) override;

@@ -1,6 +1,8 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include <chrono>
+
 //==============================================================================
 WaveForgeProcessor::WaveForgeProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
@@ -72,6 +74,8 @@ void WaveForgeProcessor::setCustomArpPattern (const wf::ArpPattern& pattern, boo
     auto copy = std::make_shared<wf::ArpPattern> (pattern);
     copy->clampAndTrim();
     customPatterns.push_back (copy);                 // old one stays alive for the audio thread
+    if (customPatterns.size() > 8)                   // but not forever, in a long session
+        customPatterns.erase (customPatterns.begin());
     customArpPattern.store (copy.get(), std::memory_order_release);
     apvts.state.setProperty (ParamID::arpCustomPatternProperty, juce::JSON::toString (copy->toJson(), true), nullptr);
 
@@ -118,6 +122,20 @@ void WaveForgeProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
 void WaveForgeProcessor::releaseResources() {}
 
+// Audio thread. Used by the Panic button and by the output guard: kill every
+// voice, drop the arpeggiator's held notes and the preview, and clear the FX
+// tails so nothing that went wrong can ring on.
+void WaveForgeProcessor::resetAudio (juce::MidiBuffer& midi) noexcept
+{
+    midi.clear();
+    engine.allNotesOff (true);
+    engine.reset();
+    arp.reset();
+    preview.stop();
+    fx.reset();
+    masterGain.setCurrentAndTargetValue (masterGain.getTargetValue());
+}
+
 double WaveForgeProcessor::getTailLengthSeconds() const
 {
     // Delay and reverb ring on after the last note; tell the host so it
@@ -137,8 +155,12 @@ void WaveForgeProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 {
     juce::ScopedNoDenormals noDenormals;
     const int numSamples = buffer.getNumSamples();
+    const auto blockStartTime = std::chrono::steady_clock::now();
     diag.blockStart (numSamples);
     buffer.clear();
+
+    if (panicRequested.exchange (false, std::memory_order_relaxed))
+        resetAudio (midi);
 
     // Merge on-screen keyboard events with host MIDI (and light up host notes).
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
@@ -189,10 +211,26 @@ void WaveForgeProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     masterGain.setTargetValue (params.global.masterGain);
     masterGain.applyGain (buffer, numSamples);
 
+    // Last line of defence before the host: never hand on NaN / Inf, and bend
+    // anything past 0 dBFS instead of letting it wrap. A trip means some state
+    // is poisoned, so everything gets reset rather than glitching every block.
+    if (outputGuard.process (buffer, numSamples))
+        resetAudio (midi);
+
     scope.push (buffer.getReadPointer (0),
                 buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
 
     diag.blockEnd (buffer, numSamples);
+
+    // Rolling share of the callback budget, for the readout in the title bar.
+    if (currentSampleRate > 0.0 && numSamples > 0)
+    {
+        const auto used = std::chrono::duration<double> (std::chrono::steady_clock::now() - blockStartTime).count();
+        const auto budget = (double) numSamples / currentSampleRate;
+        const auto load = (float) juce::jlimit (0.0, 4.0, used / budget);
+        const auto previous = cpuLoad.load (std::memory_order_relaxed);
+        cpuLoad.store (previous + 0.1f * (load - previous), std::memory_order_relaxed);
+    }
 }
 
 //==============================================================================
@@ -214,6 +252,10 @@ juce::ValueTree WaveForgeProcessor::buildStateTree()
 
 void WaveForgeProcessor::applyStateTree (const juce::ValueTree& state)
 {
+    // A truncated or foreign song would otherwise wipe every parameter.
+    if (! state.hasType (apvts.state.getType()))
+        return;
+
     apvts.replaceState (state);
     for (int i = 0; i < 2; ++i)
         setOscTableBySourceId (i, state.getProperty (ParamID::oscTableProperty (i)).toString());

@@ -32,3 +32,6 @@ desktop.ini
 # Secrets (never commit API keys)
 *.env
 settings.local.json
+
+# Scratch MIDI exported while testing (Drag to DAW / Save .mid...)
+mid/

@@ -112,6 +112,14 @@ void Voice::kill()
     pendingNote = -1;
 }
 
+// Used by Panic and by the output guard. kill() only stops the envelopes; this
+// also clears the filter, which is the one place a bad sample can persist.
+void Voice::reset()
+{
+    kill();
+    filter.reset();
+}
+
 void Voice::updateControl (const SynthParams& p, int numSamples)
 {
     // --- LFOs first: they are modulation sources for everything below.

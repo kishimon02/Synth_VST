@@ -81,6 +81,11 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     status.setFont (juce::FontOptions (12.0f));
     status.setColour (juce::Label::textColourId, ui::colours::textDim);
     addAndMakeVisible (status);
+
+    panicButton.onClick = [this] { processor.panic(); };
+    panicButton.setTooltip (juce::String (juce::CharPointer_UTF8 (
+        "鳴りっぱなしの音・アルペジオ・試聴を止めて音をリセットします")));
+    addAndMakeVisible (panicButton);
     addAndMakeVisible (global);
 
     presetLabel.setJustificationType (juce::Justification::centredRight);
@@ -157,9 +162,13 @@ void WaveForgeEditor::timerCallback()
 {
     oscPage.oscA.tick();
     oscPage.oscB.tick();
-    status.setText ("voices " + juce::String (processor.getActiveVoiceCount())
-                        + "    " + juce::String (processor.getHostBpm(), 1) + " BPM",
-                    juce::dontSendNotification);
+    juce::String line;
+    line << "voices " << processor.getActiveVoiceCount()
+         << "    " << juce::String (processor.getHostBpm(), 1) << " BPM"
+         << "    dsp " << juce::String (juce::jmin (999, juce::roundToInt (processor.getCpuLoad() * 100.0f))) << "%";
+    if (const int trips = processor.getOutputTripCount(); trips > 0)
+        line << "    !" << trips;    // blocks the output guard had to silence
+    status.setText (line, juce::dontSendNotification);
 }
 
 void WaveForgeEditor::refreshPresetMenu()
@@ -270,6 +279,7 @@ void WaveForgeEditor::resized()
     presetBox.setBounds (presetArea.reduced (2, 1));
     global.setBounds (top.removeFromRight (210));
     title.setBounds (top.removeFromLeft (120).withSizeKeepingCentre (120, 26));
+    panicButton.setBounds (top.removeFromRight (62).withSizeKeepingCentre (58, 22));
     status.setBounds (top.withSizeKeepingCentre (top.getWidth(), 26));
 
     area.removeFromTop (4);

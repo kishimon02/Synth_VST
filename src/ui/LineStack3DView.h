@@ -43,7 +43,7 @@ protected:
 
     // GL thread. Fill `verts` with numLines * pointsPerLine (x, y, z)
     // triplets, x/y/z roughly in -1..1. Return false to keep the old data.
-    virtual bool buildVertices (std::vector<float>& verts, int& numLines, int& pointsPerLine) = 0;
+    virtual bool buildVertices (std::vector<float>& verts, int& outLines, int& outPoints) = 0;
     virtual bool refillEveryFrame() const { return false; }
 
     // GL thread, every frame: an optional extra line (e.g. the interpolated

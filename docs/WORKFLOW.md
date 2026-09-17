@@ -12,7 +12,7 @@
 | `phase-4` | 3D ウェーブテーブル表示、本 UI |
 | `phase-4.5` | ウェーブテーブル・エディタ、2D / スペクトル表示、出力 3D スペクトログラム、OSC A Warp |
 | `phase-5` | AI アシスタント (Claude API 連携、MIDI 提案) |
-| `phase-6` | 仕上げ |
+| `phase-6` | 仕上げ (出力ガード、Panic、dsp 負荷表示、soak テスト) — v1.0.0 |
 
 `phase-0` は `phase-1` のコミットに含めた (同一コミットのため別タグは切っていない)。
 
@@ -23,6 +23,9 @@
 cmake --build --preset vs2022-release
 cmake --build --preset vs2022-release --target WaveForgeTests
 ./build/vs2022/WaveForgeTests_artefacts/Release/WaveForgeTests.exe
+
+# リリース前は soak を長くする (30 分ぶんの音を 2 分ほどで回す)
+./build/vs2022/WaveForgeTests_artefacts/Release/WaveForgeTests.exe --soak 30
 
 # 2. コミット + タグ
 git add -A

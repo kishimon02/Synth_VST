@@ -30,6 +30,20 @@ void SynthEngine::allNotesOff (bool immediate)
     sustainedKeys.fill (false);
 }
 
+void SynthEngine::reset()
+{
+    for (auto& v : voices)
+        v.reset();
+    heldKeys.fill (false);
+    sustainedKeys.fill (false);
+    sustainPedal = false;
+    pitchBendSemis = 0.0f;
+    modWheel = 0.0f;
+    aftertouch = 0.0f;
+    globalLfoPhase.fill (0.0f);
+    pushControllersToVoices();
+}
+
 void SynthEngine::pushControllersToVoices() noexcept
 {
     for (auto& v : voices)

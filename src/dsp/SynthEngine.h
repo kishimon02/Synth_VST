@@ -30,6 +30,7 @@ public:
     void process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const SynthParams& p);
 
     void allNotesOff (bool immediate);
+    void reset();   // panic: kill every voice and drop held keys / controllers
     int  getActiveVoiceCount() const noexcept;
 
     float getModWheel() const noexcept   { return modWheel; }

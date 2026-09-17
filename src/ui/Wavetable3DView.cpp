@@ -36,24 +36,24 @@ void Wavetable3DView::timerTick()
 }
 
 //==============================================================================
-bool Wavetable3DView::buildVertices (std::vector<float>& verts, int& numLines, int& pointsPerLine)
+bool Wavetable3DView::buildVertices (std::vector<float>& verts, int& outLines, int& outPoints)
 {
     const auto* table = pendingTable.load (std::memory_order_acquire);
     if (table == nullptr)
         return false;
 
     const int frames = table->getNumFrames();
-    numLines = frames > 1 ? juce::jmax (frames, minLines) : 1;
-    pointsPerLine = pointsPerFrame;
-    verts.resize ((size_t) numLines * pointsPerFrame * 3);
+    outLines = frames > 1 ? juce::jmax (frames, minLines) : 1;
+    outPoints = pointsPerFrame;
+    verts.resize ((size_t) outLines * pointsPerFrame * 3);
 
     // x: sample position, y: amplitude, z: depth (front = frame 0). Lines
     // between frames are interpolated exactly like the oscillator does.
     std::vector<float> frame;
     size_t k = 0;
-    for (int line = 0; line < numLines; ++line)
+    for (int line = 0; line < outLines; ++line)
     {
-        const float pos = numLines > 1 ? (float) line / (float) (numLines - 1) : 0.0f;
+        const float pos = outLines > 1 ? (float) line / (float) (outLines - 1) : 0.0f;
         interpolatedFrame (*table, pos, frame);
         const float z = -1.0f + 2.0f * pos;
         for (int i = 0; i < pointsPerFrame; ++i)

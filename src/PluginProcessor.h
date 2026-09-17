@@ -11,6 +11,7 @@
 #include "dsp/SynthEngine.h"
 #include "dsp/fx/FxChain.h"
 #include "dsp/Arpeggiator.h"
+#include "dsp/OutputGuard.h"
 #include "ai/MusicContext.h"
 #include "ai/PreviewPlayer.h"
 #include "ai/Assistant.h"
@@ -83,6 +84,15 @@ public:
     int getActiveVoiceCount() const noexcept { return activeVoices.load (std::memory_order_relaxed); }
     float getHostBpm() const noexcept { return hostBpm.load (std::memory_order_relaxed); }
 
+    // Share of the audio callback budget used by the last blocks (0..1).
+    float getCpuLoad() const noexcept { return cpuLoad.load (std::memory_order_relaxed); }
+    // Blocks the output guard had to silence (NaN / Inf); 0 in normal use.
+    int getOutputTripCount() const noexcept { return outputGuard.tripCount(); }
+
+    // Stop everything sounding right now (stuck notes, held arp, preview).
+    // Safe from any thread: the audio thread picks the request up next block.
+    void panic() noexcept { panicRequested.store (true, std::memory_order_relaxed); }
+
     // Presets (message thread only)
     void applyFactoryPreset (const juce::String& name);
     bool savePresetToFile (const juce::File& file, juce::String& error);
@@ -92,6 +102,7 @@ public:
 private:
     void timerCallback() override;
     void setOscTableBySourceId (int osc, const juce::String& sourceId);
+    void resetAudio (juce::MidiBuffer& midi) noexcept;   // audio thread: silence + clear tails
 
     juce::AudioProcessorValueTreeState apvts;
     juce::MidiKeyboardState keyboardState;
@@ -116,6 +127,10 @@ private:
     std::atomic<int> activeVoices { 0 };
     std::atomic<float> hostBpm { 120.0f };
     juce::String currentPresetName { "Init" };
+
+    wf::OutputGuard outputGuard;
+    std::atomic<bool> panicRequested { false };
+    std::atomic<float> cpuLoad { 0.0f };
 
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> masterGain { 0.5f };
     double currentSampleRate = 44100.0;

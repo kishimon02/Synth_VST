@@ -216,6 +216,7 @@ erDiagram
     SYNTH_ENGINE ||--|| MIDI_CAPTURE_FIFO : "AI へ"
     MIDI_CAPTURE_FIFO ||--|{ CAPTURED_NOTE : "queues"
     SYNTH_ENGINE ||--|| PREVIEW_QUEUE : "AI から"
+    SYNTH_ENGINE ||--|| OUTPUT_GUARD : "最終段"
 
     SYNTH_ENGINE {
         double sample_rate
@@ -224,6 +225,12 @@ erDiagram
         float current_bpm "ホストから"
         atomic_float wt_position_a "3D ビュー用"
         atomic_float wt_position_b
+        atomic_float cpu_load "処理時間 / コールバック budget"
+        atomic_bool panic_requested "Panic ボタンから"
+    }
+    OUTPUT_GUARD {
+        atomic_int trip_count "NaN/Inf でブロックを無音にした回数"
+        float ceiling "1.0 超をカーブで頭打ち (最大 2.0)"
     }
     VOICE {
         int id PK

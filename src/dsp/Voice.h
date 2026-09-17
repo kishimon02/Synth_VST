@@ -36,6 +36,7 @@ public:
                  uint32_t ageStamp, const float* globalLfoPhase);
     void noteOff();
     void kill();
+    void reset();   // kill + drop every bit of filter / oscillator state
 
     bool isActive() const noexcept    { return active; }
     bool isReleasing() const noexcept { return env1.isReleasing() && pendingNote < 0; }
