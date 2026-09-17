@@ -151,7 +151,7 @@ Claude API (既定 `claude-opus-5`) または OpenAI 互換 API に、作りか�
 - **音の結果**: 変更一覧 (現在値 → 新しい値)。**Apply** で反映、**Undo** で直前の状態に戻す。ウェーブテーブルが
   設計されていれば **Apply wavetable to OSC A** で `%APPDATA%\WaveForge\Wavetables\` に保存して読み込む
 - **アルペジオの結果**: **Apply pattern** で Custom パターンに設定、**Save as preset...** で JSON 保存
-- **モデルと思考の強さ**: 入力欄の下のバーで、このあとの依頼に使うモデル (claude-opus-5 / sonnet-5 / haiku-4-5、
+- **モデルと思考の強さ**: 入力欄の下 (強さは Send の真下に右寄せ) で、このあとの依頼に使うモデル (claude-opus-5 / sonnet-5 / haiku-4-5、
   OpenAI 互換なら gpt-5 系) と推論の強さ (Low / Medium / High) を切り替えられる。選択は設定ファイルに保存され、
   Settings ダイアログと同じ値を見ている (強さは Anthropic のみ)
 - **履歴**: 会話はセッションごとに自動保存される。**History** を押すと過去 30 日間の会話が日付別 (今日 / 昨日 / 日付) に
