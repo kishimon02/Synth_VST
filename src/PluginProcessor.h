@@ -9,6 +9,7 @@
 #include "PresetManager.h"
 #include "Diagnostics.h"
 #include "dsp/SynthEngine.h"
+#include "dsp/fx/FxChain.h"
 
 class WaveForgeProcessor final : public juce::AudioProcessor,
                                  public juce::ChangeBroadcaster,   // fires when a wavetable assignment changes
@@ -31,7 +32,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override;
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -72,6 +73,7 @@ private:
     ParamRefs refs;
     WavetableBank bank;
     wf::SynthEngine engine;
+    wf::FxChain fx;
 
     std::atomic<const wf::Wavetable*> oscTable[2] { nullptr, nullptr };
     int oscTableIndex[2] { 0, 0 };

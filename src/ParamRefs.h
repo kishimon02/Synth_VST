@@ -25,6 +25,15 @@ struct ParamRefs
     struct Mod { P enabled, source, dest, amount; } mod[wf::numModSlots];
     P masterVolume, polyphony, pitchBendRange;
 
+    struct Fx
+    {
+        P distEnabled, distMode, distDrive, distOversample, distOutput, distMix;
+        P eqEnabled, eqLowGain, eqLowFreq, eqMidGain, eqMidFreq, eqMidQ, eqHighGain, eqHighFreq;
+        P chorusEnabled, chorusRate, chorusDepth, chorusFeedback, chorusDelay, chorusMix;
+        P delayEnabled, delayTempoSync, delayTime, delayDivision, delayFeedback, delayLowpass, delayPingPong, delayMix;
+        P reverbEnabled, reverbSize, reverbDamping, reverbWidth, reverbPredelay, reverbMix;
+    } fx;
+
     void bind (juce::AudioProcessorValueTreeState& apvts)
     {
         auto get = [&apvts] (const juce::String& id)
@@ -77,6 +86,32 @@ struct ParamRefs
         masterVolume = get (ParamID::masterVolume);
         polyphony = get (ParamID::polyphony);
         pitchBendRange = get (ParamID::pitchBendRange);
+
+        {
+            namespace F = ParamID::Fx;
+            fx.distEnabled = get (F::distEnabled);       fx.distMode = get (F::distMode);
+            fx.distDrive = get (F::distDrive);           fx.distOversample = get (F::distOversample);
+            fx.distOutput = get (F::distOutput);         fx.distMix = get (F::distMix);
+
+            fx.eqEnabled = get (F::eqEnabled);
+            fx.eqLowGain = get (F::eqLowGain);           fx.eqLowFreq = get (F::eqLowFreq);
+            fx.eqMidGain = get (F::eqMidGain);           fx.eqMidFreq = get (F::eqMidFreq);
+            fx.eqMidQ = get (F::eqMidQ);
+            fx.eqHighGain = get (F::eqHighGain);         fx.eqHighFreq = get (F::eqHighFreq);
+
+            fx.chorusEnabled = get (F::chorusEnabled);   fx.chorusRate = get (F::chorusRate);
+            fx.chorusDepth = get (F::chorusDepth);       fx.chorusFeedback = get (F::chorusFeedback);
+            fx.chorusDelay = get (F::chorusDelay);       fx.chorusMix = get (F::chorusMix);
+
+            fx.delayEnabled = get (F::delayEnabled);     fx.delayTempoSync = get (F::delayTempoSync);
+            fx.delayTime = get (F::delayTime);           fx.delayDivision = get (F::delayDivision);
+            fx.delayFeedback = get (F::delayFeedback);   fx.delayLowpass = get (F::delayLowpass);
+            fx.delayPingPong = get (F::delayPingPong);   fx.delayMix = get (F::delayMix);
+
+            fx.reverbEnabled = get (F::reverbEnabled);   fx.reverbSize = get (F::reverbSize);
+            fx.reverbDamping = get (F::reverbDamping);   fx.reverbWidth = get (F::reverbWidth);
+            fx.reverbPredelay = get (F::reverbPredelay); fx.reverbMix = get (F::reverbMix);
+        }
     }
 
     wf::SynthParams snapshot (const wf::Wavetable* tableA, const wf::Wavetable* tableB, float bpm) const
@@ -135,6 +170,30 @@ struct ParamRefs
         s.global.masterGain = juce::Decibels::decibelsToGain (f (masterVolume), -60.0f);
         s.global.polyphony = n (polyphony);
         s.global.pitchBendRange = n (pitchBendRange);
+
+        auto& d = s.fx.distortion;
+        d.enabled = b (fx.distEnabled); d.mode = n (fx.distMode); d.driveDb = f (fx.distDrive);
+        d.oversample = b (fx.distOversample); d.outputDb = f (fx.distOutput); d.mix = f (fx.distMix);
+
+        auto& e = s.fx.eq;
+        e.enabled = b (fx.eqEnabled);
+        e.lowGainDb = f (fx.eqLowGain);   e.lowFreqHz = f (fx.eqLowFreq);
+        e.midGainDb = f (fx.eqMidGain);   e.midFreqHz = f (fx.eqMidFreq);   e.midQ = f (fx.eqMidQ);
+        e.highGainDb = f (fx.eqHighGain); e.highFreqHz = f (fx.eqHighFreq);
+
+        auto& c = s.fx.chorus;
+        c.enabled = b (fx.chorusEnabled); c.rateHz = f (fx.chorusRate); c.depth = f (fx.chorusDepth);
+        c.feedback = f (fx.chorusFeedback); c.delayMs = f (fx.chorusDelay); c.mix = f (fx.chorusMix);
+
+        auto& dl = s.fx.delay;
+        dl.enabled = b (fx.delayEnabled); dl.tempoSync = b (fx.delayTempoSync); dl.timeMs = f (fx.delayTime);
+        dl.division = n (fx.delayDivision); dl.feedback = f (fx.delayFeedback); dl.lowpassHz = f (fx.delayLowpass);
+        dl.pingPong = b (fx.delayPingPong); dl.mix = f (fx.delayMix);
+
+        auto& r = s.fx.reverb;
+        r.enabled = b (fx.reverbEnabled); r.size = f (fx.reverbSize); r.damping = f (fx.reverbDamping);
+        r.width = f (fx.reverbWidth); r.predelayMs = f (fx.reverbPredelay); r.mix = f (fx.reverbMix);
+
         return s;
     }
 };

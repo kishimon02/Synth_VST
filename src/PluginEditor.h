@@ -45,7 +45,20 @@ private:
     juce::TextButton savePresetButton { "Save As..." };
     juce::TextButton loadPresetButton { "Load..." };
 
+    // One column per FX unit: on/off + mix. The full parameter set is in the
+    // generic list below; this strip is for quick A/B while auditioning.
+    struct FxStrip
+    {
+        juce::Label        label;
+        juce::ToggleButton enable { "On" };
+        juce::Slider       mix;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> enableAttachment;
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
+    };
+
     OscRow oscRows[2];
+    juce::Label fxLabel { {}, "FX" };
+    FxStrip fxStrips[5];
     juce::Viewport paramViewport;
     juce::GenericAudioProcessorEditor genericParams;
     juce::MidiKeyboardComponent keyboard;

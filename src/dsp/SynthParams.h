@@ -2,6 +2,7 @@
 
 #include "Wavetable.h"
 #include "ModMatrix.h"
+#include "fx/FxParams.h"
 
 namespace wf
 {
@@ -90,8 +91,9 @@ struct SynthParams
     LfoParams     lfo[2];
     ModSlotParams modSlots[numModSlots];
     GlobalParams  global;
+    FxParams      fx;          // master chain, applied after the voices are summed
 
-    float bpm = 120.0f;        // from the host playhead, for tempo-synced LFOs
+    float bpm = 120.0f;        // from the host playhead, for tempo-synced LFOs / delay
 };
 
 } // namespace wf

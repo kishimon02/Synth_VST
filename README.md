@@ -61,11 +61,12 @@ cmake --build --preset vs2022-release --target WaveForgeTests
 
 `build/vs2022/WaveForgeTests_artefacts/Release/WaveForgeTests.exe` を実行。ミップマップの帯域制限精度、
 オシレーターの周波数精度、ADSR のタイミング、LFO の周波数とテンポ同期、モジュレーションマトリクスの加算、
+FX (ディレイのサンプル精度とフィードバック、EQ の利得、ディストーションの上限、リバーブの減衰、バイパス時の完全一致)、
 プリセットのパラメータ ID 妥当性と保存/読込、エンジン全体のレンダリング (有限・不連続なし・解放後に無音) を検証する。
 
 ## プリセット
 
-- ファクトリー: Init / Supersaw Lead / Soft Pad / Wobble Bass / Glass Bell (コード内で定義、インストール不要)
+- ファクトリー: Init / Supersaw Lead / Soft Pad / Wobble Bass / Glass Bell / Pluck Echo (コード内で定義、インストール不要)
 - ユーザー: 画面上部の「Save As...」で `%APPDATA%\WaveForge\Presets\*.wfpreset` に保存、「Load...」で読込
 - ソング保存時の状態と同じ内容を書き出すので、プリセットとソングで設定が食い違わない
 
@@ -81,7 +82,25 @@ cmake --build --preset vs2022-release --target WaveForgeTests
   - モジュレーションマトリクス 8 スロット: ソース 9 種 (Env1/2、LFO1/2、ベロシティ、モジュレーションホイール、
     アフタータッチ、キートラック、ノートごとのランダム)、デスティネーション 16 種
   - プリセット (上記)、ホストからのテンポ取得
-- 次: Phase 3 (FX)、Phase 4 (3D 表示・本 UI)、Phase 5 (AI アシスタント)、Phase 6 (仕上げ)
+- Phase 3 (FX チェーン) 完了: マスター段に固定順 Distortion → EQ → Chorus → Delay → Reverb (下記)
+- 次: Phase 4 (3D 表示・本 UI)、Phase 5 (AI アシスタント)、Phase 6 (仕上げ)
+
+## FX チェーン
+
+ボイスをミックスした後、マスターボリュームの前に固定順で通る。各ユニットは個別に ON/OFF でき、
+OFF のユニットは処理を完全にスキップする (全 OFF ならバッファに触らない)。OFF → ON にした瞬間に
+そのユニットの内部状態をリセットするので、古い残響やディレイが突然鳴り出すことはない。
+
+| ユニット | パラメータ | 実装 |
+|---|---|---|
+| Distortion | Mode (Soft / Hard / Fold)、Drive 0〜40 dB、Oversample 2x、Output、Mix | 波形整形 + 2x オーバーサンプリング (ポリフェーズ IIR ハーフバンド) + DC ブロッカー |
+| EQ | Low shelf / Mid peak (Q) / High shelf、各 ±18 dB | RBJ バイクアッド (係数はパラメータが変わったときだけ再計算、ヒープ不使用) |
+| Chorus | Rate、Depth、Feedback、Delay (中心)、Mix | `juce::dsp::Chorus` |
+| Delay | Tempo Sync / Time (ms) / Division (LFO と同じ 15 分割)、Feedback、Lowpass、Ping Pong、Mix | 自前の線形補間ディレイライン (最大 5 秒)、時間変更は 50 ms でグライド |
+| Reverb | Size、Damping、Width、Predelay (0〜250 ms)、Mix | `juce::Reverb` (Freeverb 系、軽量) + プリディレイ |
+
+画面中段の FX ストリップで各ユニットの ON/OFF と Mix を操作できる。細かいパラメータは下の一覧にある。
+Delay か Reverb が ON のときはホストにテール 6 秒を申告するので、バウンス時に余韻が切れない。
 
 ## 音のテスト時の注意
 

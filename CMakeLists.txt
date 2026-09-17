@@ -65,6 +65,7 @@ set(WAVEFORGE_DSP_SOURCES
     src/dsp/WavetableLoader.cpp
     src/dsp/Voice.cpp
     src/dsp/SynthEngine.cpp
+    src/dsp/fx/FxChain.cpp
 )
 
 target_sources(WaveForge PRIVATE

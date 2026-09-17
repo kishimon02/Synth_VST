@@ -36,6 +36,7 @@ const std::vector<PresetManager::FactoryPreset>& PresetManager::factoryPresets()
         const auto lfo1 = ParamID::lfo (0);
         const auto mod1 = ParamID::modSlot (0);
         const auto mod2 = ParamID::modSlot (1);
+        namespace F = ParamID::Fx;
 
         std::vector<FactoryPreset> p;
 
@@ -50,6 +51,10 @@ const std::vector<PresetManager::FactoryPreset>& PresetManager::factoryPresets()
             { ParamID::filterType, 1.0f }, { ParamID::filterCutoff, 9000.0f }, { ParamID::filterResonance, 0.18f },
             { ParamID::filterKeyTrack, 0.4f },
             { env1.attack, 3.0f }, { env1.decay, 900.0f }, { env1.sustain, 0.75f }, { env1.release, 260.0f },
+            { F::chorusEnabled, 1.0f }, { F::chorusRate, 0.6f }, { F::chorusDepth, 0.25f }, { F::chorusMix, 0.3f },
+            { F::delayEnabled, 1.0f }, { F::delayDivision, 14.0f }, { F::delayFeedback, 0.3f },
+            { F::delayLowpass, 4000.0f }, { F::delayMix, 0.18f },
+            { F::reverbEnabled, 1.0f }, { F::reverbSize, 0.7f }, { F::reverbMix, 0.2f },
             { ParamID::masterVolume, -9.0f }, { ParamID::polyphony, 8.0f }
         }});
 
@@ -65,6 +70,9 @@ const std::vector<PresetManager::FactoryPreset>& PresetManager::factoryPresets()
             { lfo1.tempoSync, 1.0f }, { lfo1.division, 1.0f }, { lfo1.retrigger, 0.0f }, { lfo1.shape, 0.0f },
             { mod1.enabled, 1.0f }, { mod1.source, (float) wf::ModSource::lfo1 }, { mod1.dest, (float) wf::ModDest::oscAWtPos },
             { mod1.amount, 0.22f },
+            { F::chorusEnabled, 1.0f }, { F::chorusRate, 0.3f }, { F::chorusDepth, 0.4f }, { F::chorusMix, 0.4f },
+            { F::reverbEnabled, 1.0f }, { F::reverbSize, 0.85f }, { F::reverbDamping, 0.4f },
+            { F::reverbPredelay, 20.0f }, { F::reverbMix, 0.35f },
             { ParamID::masterVolume, -10.0f }
         }});
 
@@ -79,6 +87,8 @@ const std::vector<PresetManager::FactoryPreset>& PresetManager::factoryPresets()
             { lfo1.tempoSync, 1.0f }, { lfo1.division, 6.0f }, { lfo1.retrigger, 1.0f }, { lfo1.shape, 0.0f },
             { mod1.enabled, 1.0f }, { mod1.source, (float) wf::ModSource::lfo1 }, { mod1.dest, (float) wf::ModDest::filterCutoff },
             { mod1.amount, 0.45f },
+            { F::distEnabled, 1.0f }, { F::distMode, 0.0f }, { F::distDrive, 10.0f }, { F::distOutput, -3.0f },
+            { F::distMix, 0.6f },
             { ParamID::masterVolume, -8.0f }, { ParamID::polyphony, 2.0f }
         }});
 
@@ -93,7 +103,25 @@ const std::vector<PresetManager::FactoryPreset>& PresetManager::factoryPresets()
             { mod1.amount, 0.55f },
             { mod2.enabled, 1.0f }, { mod2.source, (float) wf::ModSource::velocity }, { mod2.dest, (float) wf::ModDest::oscAWtPos },
             { mod2.amount, 0.2f },
+            { F::delayEnabled, 1.0f }, { F::delayDivision, 6.0f }, { F::delayPingPong, 1.0f },
+            { F::delayFeedback, 0.35f }, { F::delayMix, 0.25f },
+            { F::reverbEnabled, 1.0f }, { F::reverbSize, 0.8f }, { F::reverbMix, 0.3f },
             { ParamID::masterVolume, -10.0f }
+        }});
+
+        p.push_back ({ "Pluck Echo", builtin ("Basic Shapes"), builtin ("PWM"),
+        {
+            { a.wtPos, 0.62f }, { a.level, 0.7f }, { a.unisonVoices, 2.0f }, { a.unisonDetune, 6.0f },
+            { b.enabled, 1.0f }, { b.wtPos, 0.5f }, { b.octave, 1.0f }, { b.level, 0.25f },
+            { ParamID::filterType, 1.0f }, { ParamID::filterCutoff, 600.0f }, { ParamID::filterResonance, 0.25f },
+            { ParamID::filterKeyTrack, 0.5f }, { ParamID::filterEnv2Amount, 40.0f },
+            { env1.attack, 1.0f }, { env1.decay, 350.0f }, { env1.sustain, 0.0f }, { env1.release, 200.0f },
+            { env2.attack, 1.0f }, { env2.decay, 180.0f }, { env2.sustain, 0.0f }, { env2.release, 150.0f },
+            { F::eqEnabled, 1.0f }, { F::eqLowGain, -3.0f }, { F::eqHighGain, 2.5f },
+            { F::delayEnabled, 1.0f }, { F::delayDivision, 14.0f }, { F::delayPingPong, 1.0f },
+            { F::delayFeedback, 0.5f }, { F::delayLowpass, 3500.0f }, { F::delayMix, 0.35f },
+            { F::reverbEnabled, 1.0f }, { F::reverbSize, 0.5f }, { F::reverbMix, 0.2f },
+            { ParamID::masterVolume, -8.0f }
         }});
 
         return p;

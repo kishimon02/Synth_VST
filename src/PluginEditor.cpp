@@ -48,6 +48,41 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
         addAndMakeVisible (row.view);
     }
 
+    {
+        namespace F = ParamID::Fx;
+        struct Def { const char* name; const char* enableId; const char* mixId; };
+        const Def defs[5] = { { "Distortion", F::distEnabled,   F::distMix },
+                              { "EQ",         F::eqEnabled,     nullptr },
+                              { "Chorus",     F::chorusEnabled, F::chorusMix },
+                              { "Delay",      F::delayEnabled,  F::delayMix },
+                              { "Reverb",     F::reverbEnabled, F::reverbMix } };
+
+        fxLabel.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        addAndMakeVisible (fxLabel);
+
+        auto& apvts = p.getAPVTS();
+        for (int i = 0; i < 5; ++i)
+        {
+            auto& s = fxStrips[i];
+            s.label.setText (defs[i].name, juce::dontSendNotification);
+            s.label.setJustificationType (juce::Justification::centred);
+            addAndMakeVisible (s.label);
+
+            s.enableAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+                apvts, defs[i].enableId, s.enable);
+            addAndMakeVisible (s.enable);
+
+            s.mix.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+            s.mix.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 50, 16);
+            if (defs[i].mixId != nullptr)
+            {
+                s.mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+                    apvts, defs[i].mixId, s.mix);
+                addAndMakeVisible (s.mix);
+            }
+        }
+    }
+
     paramViewport.setViewedComponent (&genericParams, false);
     paramViewport.setScrollBarsShown (true, false);
     addAndMakeVisible (paramViewport);
@@ -61,8 +96,8 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     startTimerHz (30);
 
     setResizable (true, true);
-    setResizeLimits (800, 600, 1800, 1200);
-    setSize (1000, 760);
+    setResizeLimits (800, 640, 1800, 1200);
+    setSize (1000, 820);
 }
 
 WaveForgeEditor::~WaveForgeEditor()
@@ -181,7 +216,7 @@ void WaveForgeEditor::timerCallback()
         if (auto* pos = apvts.getRawParameterValue (ParamID::osc (i).wtPos))
             oscRows[i].view.setPosition (pos->load());
     }
-    title.setText ("WaveForge  -  Phase 2 (LFO + mod matrix)    voices: "
+    title.setText ("WaveForge  -  Phase 3 (FX chain)    voices: "
                        + juce::String (processor.getActiveVoiceCount())
                        + "    " + juce::String (processor.getHostBpm(), 1) + " BPM",
                    juce::dontSendNotification);
@@ -220,6 +255,19 @@ void WaveForgeEditor::resized()
         row.tableBox.setBounds (header.reduced (4, 0));
         col.removeFromTop (4);
         row.view.setBounds (col);
+    }
+
+    area.removeFromTop (8);
+    auto fxArea = area.removeFromTop (78);
+    fxLabel.setBounds (fxArea.removeFromLeft (40));
+    const int stripW = fxArea.getWidth() / 5;
+    for (auto& s : fxStrips)
+    {
+        auto col = fxArea.removeFromLeft (stripW).reduced (4, 0);
+        s.label.setBounds (col.removeFromTop (18));
+        auto left = col.removeFromLeft (col.getWidth() / 2);
+        s.enable.setBounds (left.withSizeKeepingCentre (60, 24));
+        s.mix.setBounds (col);
     }
 
     area.removeFromTop (8);

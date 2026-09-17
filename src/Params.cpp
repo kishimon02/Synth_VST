@@ -2,6 +2,7 @@
 
 #include "dsp/Lfo.h"
 #include "dsp/ModMatrix.h"
+#include "dsp/fx/Distortion.h"
 
 namespace
 {
@@ -134,6 +135,49 @@ juce::AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         layout.add (choice (m.source, n + "Source", sourceNames, 0));
         layout.add (choice (m.dest, n + "Dest", destNames, 0));
         layout.add (flt (m.amount, n + "Amount", Range (-1.0f, 1.0f, 0.001f), 0.0f));
+    }
+
+    // ---- FX
+    {
+        using namespace ParamID::Fx;
+        layout.add (boolean (distEnabled, "Dist On", false));
+        layout.add (choice (distMode, "Dist Mode", wf::Distortion::modeNames(), 0));
+        layout.add (flt (distDrive, "Dist Drive", Range (0.0f, 40.0f, 0.1f), 12.0f, "dB"));
+        layout.add (boolean (distOversample, "Dist Oversample 2x", true));
+        layout.add (flt (distOutput, "Dist Output", Range (-24.0f, 6.0f, 0.1f), 0.0f, "dB"));
+        layout.add (flt (distMix, "Dist Mix", unit(), 1.0f));
+
+        layout.add (boolean (eqEnabled, "EQ On", false));
+        layout.add (flt (eqLowGain,  "EQ Low Gain",  Range (-18.0f, 18.0f, 0.1f), 0.0f, "dB"));
+        layout.add (flt (eqLowFreq,  "EQ Low Freq",  skewed (30.0f, 600.0f, 120.0f), 120.0f, "Hz"));
+        layout.add (flt (eqMidGain,  "EQ Mid Gain",  Range (-18.0f, 18.0f, 0.1f), 0.0f, "dB"));
+        layout.add (flt (eqMidFreq,  "EQ Mid Freq",  skewed (200.0f, 8000.0f, 1000.0f), 1000.0f, "Hz"));
+        layout.add (flt (eqMidQ,     "EQ Mid Q",     skewed (0.3f, 8.0f, 1.0f), 1.0f));
+        layout.add (flt (eqHighGain, "EQ High Gain", Range (-18.0f, 18.0f, 0.1f), 0.0f, "dB"));
+        layout.add (flt (eqHighFreq, "EQ High Freq", skewed (1500.0f, 16000.0f, 6000.0f), 6000.0f, "Hz"));
+
+        layout.add (boolean (chorusEnabled, "Chorus On", false));
+        layout.add (flt (chorusRate,     "Chorus Rate",     skewed (0.05f, 10.0f, 1.0f), 0.8f, "Hz"));
+        layout.add (flt (chorusDepth,    "Chorus Depth",    unit(), 0.3f));
+        layout.add (flt (chorusFeedback, "Chorus Feedback", Range (-0.95f, 0.95f, 0.01f), 0.0f));
+        layout.add (flt (chorusDelay,    "Chorus Delay",    Range (1.0f, 50.0f, 0.1f), 7.0f, "ms"));
+        layout.add (flt (chorusMix,      "Chorus Mix",      unit(), 0.5f));
+
+        layout.add (boolean (delayEnabled, "Delay On", false));
+        layout.add (boolean (delayTempoSync, "Delay Tempo Sync", true));
+        layout.add (flt (delayTime, "Delay Time", skewed (1.0f, 4000.0f, 300.0f), 375.0f, "ms"));
+        layout.add (choice (delayDivision, "Delay Division", wf::Lfo::divisionNames(), 6));
+        layout.add (flt (delayFeedback, "Delay Feedback", Range (0.0f, 0.95f, 0.01f), 0.4f));
+        layout.add (flt (delayLowpass,  "Delay Lowpass",  skewed (200.0f, 20000.0f, 4000.0f), 6000.0f, "Hz"));
+        layout.add (boolean (delayPingPong, "Delay Ping Pong", false));
+        layout.add (flt (delayMix, "Delay Mix", unit(), 0.3f));
+
+        layout.add (boolean (reverbEnabled, "Reverb On", false));
+        layout.add (flt (reverbSize,     "Reverb Size",     unit(), 0.6f));
+        layout.add (flt (reverbDamping,  "Reverb Damping",  unit(), 0.5f));
+        layout.add (flt (reverbWidth,    "Reverb Width",    unit(), 1.0f));
+        layout.add (flt (reverbPredelay, "Reverb Predelay", Range (0.0f, 250.0f, 1.0f), 10.0f, "ms"));
+        layout.add (flt (reverbMix,      "Reverb Mix",      unit(), 0.25f));
     }
 
     return layout;

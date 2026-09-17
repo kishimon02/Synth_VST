@@ -14,6 +14,7 @@
 #include "dsp/WavetableOscillator.h"
 #include "dsp/Envelope.h"
 #include "dsp/SynthEngine.h"
+#include "dsp/fx/FxChain.h"
 
 #include <cmath>
 #include <iostream>
@@ -344,6 +345,226 @@ struct ModMatrixTest final : public juce::UnitTest
     }
 };
 
+struct FxTest final : public juce::UnitTest
+{
+    FxTest() : juce::UnitTest ("FX chain", "DSP") {}
+
+    static constexpr double sr = 48000.0;
+
+    static juce::AudioBuffer<float> sine (float freqHz, float amp, int numSamples)
+    {
+        juce::AudioBuffer<float> b (2, numSamples);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float v = amp * std::sin (juce::MathConstants<float>::twoPi * freqHz * (float) i / (float) sr);
+            b.setSample (0, i, v);
+            b.setSample (1, i, v);
+        }
+        return b;
+    }
+
+    static float rms (const juce::AudioBuffer<float>& b, int from, int to)
+    {
+        double sum = 0.0;
+        for (int i = from; i < to; ++i)
+            sum += (double) b.getSample (0, i) * b.getSample (0, i);
+        return (float) std::sqrt (sum / (double) juce::jmax (1, to - from));
+    }
+
+    static bool allFinite (const juce::AudioBuffer<float>& b)
+    {
+        for (int ch = 0; ch < b.getNumChannels(); ++ch)
+            for (int i = 0; i < b.getNumSamples(); ++i)
+                if (! std::isfinite (b.getSample (ch, i)))
+                    return false;
+        return true;
+    }
+
+    void runTest() override
+    {
+        beginTest ("delay echoes an impulse after exactly the set time, with feedback");
+        {
+            wf::Delay delay;
+            delay.prepare (sr, 256);
+            wf::DelayParams dp;
+            dp.tempoSync = false; dp.timeMs = 100.0f; dp.feedback = 0.5f;
+            dp.lowpassHz = 20000.0f; dp.mix = 1.0f;
+            delay.update (dp, 120.0f);
+            delay.reset();   // snap the smoothed time to its target
+
+            const int n = 12000;
+            juce::AudioBuffer<float> b (2, n);
+            b.clear();
+            b.setSample (0, 0, 1.0f); b.setSample (1, 0, 1.0f);
+            delay.process (b.getWritePointer (0), b.getWritePointer (1), n);
+
+            int peakIndex = 0; float peak = 0.0f;
+            for (int i = 1; i < n; ++i)
+                if (std::abs (b.getSample (0, i)) > peak) { peak = std::abs (b.getSample (0, i)); peakIndex = i; }
+            logMessage ("first echo at sample " + juce::String (peakIndex) + " amp=" + juce::String (peak, 3));
+            expectEquals (peakIndex, 4800, "100 ms at 48 kHz");
+            expectWithinAbsoluteError (peak, 1.0f, 0.05f, "first echo at unity (mix 1, feedback lowpass open)");
+            expectWithinAbsoluteError (std::abs (b.getSample (0, 9600)), 0.5f, 0.05f, "second echo at feedback level");
+            expectLessThan (std::abs (b.getSample (0, 2400)), 1.0e-6f, "silence between echoes");
+
+            dp.tempoSync = true; dp.division = 5;   // 1/4 note
+            delay.update (dp, 120.0f);
+            delay.reset();
+            expectWithinAbsoluteError (delay.getCurrentDelaySamples(), 24000.0f, 1.0f, "1/4 at 120 BPM = 500 ms");
+        }
+
+        beginTest ("EQ low shelf boosts the lows and leaves the highs alone");
+        {
+            wf::Eq3 eq;
+            eq.prepare (sr);
+            wf::EqParams ep;
+            ep.lowGainDb = 12.0f; ep.lowFreqHz = 100.0f;
+            eq.update (ep);
+
+            auto low = sine (30.0f, 0.1f, 48000);
+            eq.process (low.getWritePointer (0), low.getWritePointer (1), low.getNumSamples());
+            const float lowGain = juce::Decibels::gainToDecibels (rms (low, 24000, 48000) / (0.1f / std::sqrt (2.0f)));
+
+            eq.reset();
+            auto high = sine (5000.0f, 0.1f, 48000);
+            eq.process (high.getWritePointer (0), high.getWritePointer (1), high.getNumSamples());
+            const float highGain = juce::Decibels::gainToDecibels (rms (high, 24000, 48000) / (0.1f / std::sqrt (2.0f)));
+
+            logMessage ("30 Hz: " + juce::String (lowGain, 2) + " dB   5 kHz: " + juce::String (highGain, 2) + " dB");
+            expectWithinAbsoluteError (lowGain, 12.0f, 1.0f, "shelf gain at 30 Hz");
+            expectWithinAbsoluteError (highGain, 0.0f, 0.3f, "flat at 5 kHz");
+        }
+
+        beginTest ("distortion clips hard, stays bounded and is a no-op at mix 0");
+        {
+            wf::Distortion dist;
+            dist.prepare (sr, 512);
+            wf::DistortionParams dp;
+            dp.mode = wf::Distortion::hard; dp.driveDb = 30.0f; dp.oversample = false; dp.mix = 1.0f;
+            dist.update (dp);
+            dist.reset();
+
+            auto b = sine (440.0f, 0.5f, 4096);
+            for (int start = 0; start < 4096; start += 512)
+            {
+                float* ptrs[2] { b.getWritePointer (0, start), b.getWritePointer (1, start) };
+                juce::AudioBuffer<float> view (ptrs, 2, 512);
+                dist.process (view, 512);
+            }
+            const float peak = b.getMagnitude (0, 0, 4096);
+            const float crest = peak / rms (b, 1024, 4096);
+            logMessage ("hard clip: peak=" + juce::String (peak, 3) + " crest=" + juce::String (crest, 3));
+            expect (allFinite (b), "finite");
+            // The DC blocker after the clipper tilts the flat tops slightly, so
+            // allow a few percent over the +-1 clip level.
+            expectLessThan (peak, 1.08f, "hard clip bounded to about +-1");
+            expectLessThan (crest, 1.15f, "nearly a square wave (sine would be 1.414)");
+
+            dp.mode = wf::Distortion::fold; dp.oversample = true;
+            dist.update (dp); dist.reset();
+            auto f = sine (440.0f, 0.5f, 512);
+            dist.process (f, 512);
+            expect (allFinite (f), "fold + oversampling finite");
+            expectLessThan (f.getMagnitude (0, 0, 512), 1.5f, "fold bounded");
+
+            dp.mode = wf::Distortion::soft; dp.mix = 0.0f;
+            dist.update (dp); dist.reset();
+            auto dry = sine (440.0f, 0.5f, 512);
+            auto wet = dry;
+            dist.process (wet, 512);
+            float maxDiff = 0.0f;
+            for (int i = 0; i < 512; ++i)
+                maxDiff = juce::jmax (maxDiff, std::abs (wet.getSample (0, i) - dry.getSample (0, i)));
+            expectLessThan (maxDiff, 1.0e-6f, "mix 0 passes the dry signal");
+        }
+
+        beginTest ("chorus changes the signal and stays bounded");
+        {
+            wf::Chorus chorus;
+            chorus.prepare (sr, 512);
+            wf::ChorusParams cp;
+            cp.depth = 0.5f; cp.mix = 0.5f;
+            chorus.update (cp);
+            chorus.reset();
+
+            auto dry = sine (440.0f, 0.5f, 512);
+            auto wet = dry;
+            for (int i = 0; i < 40; ++i)   // let the modulation move
+            {
+                wet = sine (440.0f, 0.5f, 512);
+                chorus.process (wet, 512);
+            }
+            float maxDiff = 0.0f;
+            for (int i = 0; i < 512; ++i)
+                maxDiff = juce::jmax (maxDiff, std::abs (wet.getSample (0, i) - dry.getSample (0, i)));
+            expect (allFinite (wet), "finite");
+            expectGreaterThan (maxDiff, 0.01f, "chorus audibly alters the signal");
+            expectLessThan (wet.getMagnitude (0, 0, 512), 1.2f, "no gain blow-up");
+        }
+
+        beginTest ("reverb produces a decaying tail");
+        {
+            wf::Reverb reverb;
+            reverb.prepare (sr, 512);
+            wf::ReverbParams rp;
+            rp.size = 0.8f; rp.mix = 1.0f; rp.predelayMs = 0.0f;
+            reverb.update (rp);
+            reverb.reset();
+
+            const int n = (int) sr * 2;
+            juce::AudioBuffer<float> b (2, n);
+            b.clear();
+            b.setSample (0, 0, 1.0f); b.setSample (1, 0, 1.0f);
+            for (int start = 0; start < n; start += 512)
+            {
+                float* ptrs[2] { b.getWritePointer (0, start), b.getWritePointer (1, start) };
+                juce::AudioBuffer<float> view (ptrs, 2, juce::jmin (512, n - start));
+                reverb.process (view, view.getNumSamples());
+            }
+            const float early = rms (b, 4800, 24000);
+            const float late  = rms (b, 72000, 96000);
+            logMessage ("reverb rms early=" + juce::String (early, 5) + " late=" + juce::String (late, 5));
+            expect (allFinite (b), "finite");
+            expectGreaterThan (early, 1.0e-4f, "tail present");
+            expectGreaterThan (late, 0.0f, "tail still ringing at 1.5 s");
+            expectLessThan (late, early, "tail decays");
+        }
+
+        beginTest ("the chain is bit-exact when bypassed, and safe on mono / large blocks");
+        {
+            wf::FxChain chain;
+            chain.prepare (sr, 64);
+            wf::FxParams off;   // everything disabled by default
+
+            auto src = sine (220.0f, 0.5f, 1000);
+            auto b = src;
+            chain.process (b, off, 120.0f);
+            bool identical = true;
+            for (int i = 0; i < 1000; ++i)
+                identical = identical && b.getSample (0, i) == src.getSample (0, i);
+            expect (identical, "bypassed chain leaves the buffer untouched");
+
+            wf::FxParams on;
+            on.distortion.enabled = on.eq.enabled = on.chorus.enabled = on.delay.enabled = on.reverb.enabled = true;
+            on.eq.lowGainDb = 6.0f; on.eq.midGainDb = -4.0f; on.eq.highGainDb = 3.0f;
+            b = src;
+            chain.process (b, on, 120.0f);     // 1000 samples through a 64-sample prepare -> chunked
+            expect (allFinite (b), "all units on: finite");
+            expectLessThan (b.getMagnitude (0, 0, 1000), 4.0f, "all units on: sane level");
+
+            juce::AudioBuffer<float> mono (1, 1000);
+            for (int i = 0; i < 1000; ++i)
+                mono.setSample (0, i, src.getSample (0, i));
+            chain.process (mono, on, 120.0f);
+            expect (allFinite (mono), "mono buffer: finite");
+
+            chain.process (b, off, 120.0f);    // switching everything off again
+            chain.process (b, on, 120.0f);     // and back on resets the units without blowing up
+            expect (allFinite (b), "toggle: finite");
+        }
+    }
+};
+
 // Minimal host for an APVTS, so presets can be tested without the plugin.
 struct DummyProcessor final : public juce::AudioProcessor
 {
@@ -401,6 +622,20 @@ struct PresetTest final : public juce::UnitTest
             }
         }
 
+        beginTest ("every FX parameter id exists, and the id list is complete");
+        {
+            const auto ids = ParamID::Fx::all();
+            for (const auto& id : ids)
+                expect (apvts.getParameter (id) != nullptr, "unknown FX parameter '" + id + "'");
+
+            int fxParamsInLayout = 0;
+            for (auto* param : proc.getParameters())
+                if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (param))
+                    if (withId->paramID.startsWith ("fx_"))
+                        ++fxParamsInLayout;
+            expectEquals (fxParamsInLayout, ids.size(), "ParamID::Fx::all() lists every fx_ parameter");
+        }
+
         beginTest ("applying a preset changes parameters, and Init restores the defaults");
         const auto* supersaw = PresetManager::findFactory ("Supersaw Lead");
         expect (supersaw != nullptr);
@@ -456,6 +691,7 @@ static EnvelopeTest envelopeTest;
 static EngineRenderTest engineRenderTest;
 static LfoTest lfoTest;
 static ModMatrixTest modMatrixTest;
+static FxTest fxTest;
 static PresetTest presetTest;
 
 int main()

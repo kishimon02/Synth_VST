@@ -140,12 +140,13 @@ erDiagram
         enum type PK "distortion eq chorus delay reverb"
         bool enabled
         int order "固定順 0-4"
-        float mix
+        float mix "EQ には無い (帯域ごとの gain で代用)"
     }
     DISTORTION {
         enum mode "soft / hard / fold"
-        float drive
+        float drive_db "0-40"
         bool oversample_2x
+        float output_db "-24..6 (wet のみ)"
     }
     EQ3 {
         float low_gain_db

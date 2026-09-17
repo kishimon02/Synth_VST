@@ -61,17 +61,26 @@ void WaveForgeProcessor::timerCallback()
 
 void WaveForgeProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    juce::ignoreUnused (samplesPerBlock);
     currentSampleRate = sampleRate;
 #if WAVEFORGE_DIAGNOSTICS
     startTimer (2000);
 #endif
     engine.prepare (sampleRate);
+    fx.prepare (sampleRate, juce::jmax (32, samplesPerBlock));
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (refs.masterVolume->load(), -60.0f));
 }
 
 void WaveForgeProcessor::releaseResources() {}
+
+double WaveForgeProcessor::getTailLengthSeconds() const
+{
+    // Delay and reverb ring on after the last note; tell the host so it
+    // keeps rendering (bounce / freeze) until the tail is done.
+    const bool delayOn  = refs.fx.delayEnabled  != nullptr && refs.fx.delayEnabled->load()  >= 0.5f;
+    const bool reverbOn = refs.fx.reverbEnabled != nullptr && refs.fx.reverbEnabled->load() >= 0.5f;
+    return (delayOn || reverbOn) ? 6.0 : 0.0;
+}
 
 bool WaveForgeProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
@@ -101,6 +110,8 @@ void WaveForgeProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
                                        hostBpm.load (std::memory_order_relaxed));
     engine.process (buffer, midi, params);
     activeVoices.store (engine.getActiveVoiceCount(), std::memory_order_relaxed);
+
+    fx.process (buffer, params.fx, params.bpm);
 
     masterGain.setTargetValue (params.global.masterGain);
     masterGain.applyGain (buffer, numSamples);
