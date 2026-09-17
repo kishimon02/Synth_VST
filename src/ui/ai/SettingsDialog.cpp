@@ -20,6 +20,17 @@ SettingsDialogContent::SettingsDialogContent (std::function<void (const ai::Sett
     providerBox.onChange = [this] { refreshForProvider(); };
     addAndMakeVisible (providerBox);
 
+    // Hosts such as Studio One swallow Ctrl+V, so the key gets a paste button.
+    pasteKeyButton.onClick = [this]
+    {
+        const auto text = juce::SystemClipboard::getTextFromClipboard().trim();
+        if (text.isNotEmpty())
+            keyEditor.setText (text, false);
+    };
+    pasteKeyButton.setTooltip (juce::String (juce::CharPointer_UTF8 (
+        "クリップボードから API キーを貼り付け (DAW 内では Ctrl+V が効きません)")));
+    addAndMakeVisible (pasteKeyButton);
+
     keyEditor.setPasswordCharacter ((juce::juce_wchar) 0x2022);
     keyEditor.setText (s.apiKey, false);
     keyEditor.setColour (juce::TextEditor::backgroundColourId, colours::widget);
@@ -119,7 +130,8 @@ ai::Settings SettingsDialogContent::collect() const
 {
     ai::Settings s;
     s.provider = providerBox.getSelectedId() == 1 ? "anthropic" : "openai";
-    s.apiKey = keyEditor.getText().trim();
+    // a key never contains spaces; strip anything a copy/paste dragged in
+    s.apiKey = keyEditor.getText().removeCharacters (" \t\r\n");
     s.model = modelBox.getText().trim();
     s.baseUrl = urlEditor.getText().trim();
     s.effort = effortBox.getText();
@@ -149,7 +161,13 @@ void SettingsDialogContent::resized()
         r.removeFromTop (4);
     };
     line (providerLabel, providerBox);
-    line (keyLabel, keyEditor);
+    {
+        auto row = r.removeFromTop (30);
+        keyLabel.setBounds (row.removeFromLeft (90));
+        pasteKeyButton.setBounds (row.removeFromRight (72).reduced (2, 3));
+        keyEditor.setBounds (row.reduced (0, 3));
+        r.removeFromTop (4);
+    }
     line (modelLabel, modelBox);
     line (urlLabel, urlEditor);
     line (effortLabel, effortBox);

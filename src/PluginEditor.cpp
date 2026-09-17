@@ -129,6 +129,8 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, ui::colours::accent.withAlpha (0.3f));
     addAndMakeVisible (keyboard);
 
+    tooltips = std::make_unique<juce::TooltipWindow> (this, 700);
+
     processor.addChangeListener (this);
     startTimerHz (30);
 

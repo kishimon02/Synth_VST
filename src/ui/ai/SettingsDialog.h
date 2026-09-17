@@ -29,7 +29,8 @@ private:
                 urlLabel { {}, "Base URL" }, effortLabel { {}, "Effort" }, status;
     juce::ComboBox providerBox, modelBox, effortBox;
     juce::TextEditor keyEditor, urlEditor;
-    juce::TextButton testButton { "Test connection" }, saveButton { "Save" }, cancelButton { "Cancel" };
+    juce::TextButton testButton { "Test connection" }, saveButton { "Save" }, cancelButton { "Cancel" },
+                     pasteKeyButton { "Paste" };
     std::function<void (const ai::Settings&)> onSaved;
     std::atomic<bool> testing { false };
     juce::String testResult;

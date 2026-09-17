@@ -31,7 +31,8 @@ AiPage::AiPage (WaveForgeProcessor& p)
     hintLabel.setColour (juce::Label::textColourId, colours::textDim);
     hintLabel.setFont (juce::FontOptions (11.5f));
     hintLabel.setText (jp("Rec で演奏 / 再生中の MIDI を取り込み、.mid をここにドロップすると他トラックも渡せます。"
-                          "Presets とクイックボタンは入力欄に入るだけなので、書き足してから Send (Enter) で送信。Shift+Enter で改行。"),
+                          "Presets とクイックボタンは入力欄に入るだけなので、書き足してから Send で送信。"
+                          "貼り付けは Paste ボタン (DAW 内では Ctrl+V が効きません)。"),
                        juce::dontSendNotification);
     addAndMakeVisible (hintLabel);
 
@@ -92,10 +93,21 @@ AiPage::AiPage (WaveForgeProcessor& p)
 
     presetsButton.onClick = [this] { showPresetsMenu(); };
     savePresetButton.onClick = [this] { saveInputAsPreset(); };
+    // Studio One keeps Ctrl+V for itself, so the clipboard needs a button of its own.
+    pasteButton.onClick = [this]
+    {
+        const auto text = juce::SystemClipboard::getTextFromClipboard();
+        if (text.isEmpty())
+            return;
+        input.insertTextAtCaret (text);
+        input.grabKeyboardFocus();
+    };
+    pasteButton.setTooltip (jp("クリップボードから貼り付け。DAW によっては Ctrl+V がホストに取られるので、"
+                               "このボタンか入力欄の右クリックを使ってください。"));
     sendButton.onClick = [this] { sendInput(); };
     cancelButton.onClick = [this] { assistant.cancel(); };
     sendButton.setColour (juce::TextButton::buttonColourId, colours::accentFx.withAlpha (0.35f));
-    for (auto* b : { &presetsButton, &savePresetButton, &sendButton, &cancelButton })
+    for (auto* b : { &presetsButton, &savePresetButton, &pasteButton, &sendButton, &cancelButton })
         addAndMakeVisible (b);
 
     modelBox.setTooltip (jp("このあとの依頼に使うモデル"));
@@ -496,8 +508,10 @@ void AiPage::resized()
     bottom.removeFromBottom (4);
     auto inputRow = bottom;
     auto left = inputRow.removeFromLeft (92);
-    presetsButton.setBounds (left.removeFromTop (34).reduced (2));
-    savePresetButton.setBounds (left.removeFromTop (34).reduced (2));
+    const int leftButton = juce::jmax (22, left.getHeight() / 3);
+    presetsButton.setBounds (left.removeFromTop (leftButton).reduced (2, 1));
+    savePresetButton.setBounds (left.removeFromTop (leftButton).reduced (2, 1));
+    pasteButton.setBounds (left.removeFromTop (leftButton).reduced (2, 1));
     auto right = inputRow.removeFromRight (92);
     sendButton.setBounds (right.removeFromTop (34).reduced (2));
     cancelButton.setBounds (right.removeFromTop (34).reduced (2));
@@ -668,6 +682,9 @@ AiPage::NotesCard::NotesCard (AiPage& p, const ai::ChatMessage& m) : page (p), m
                                       juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MIDI", error);
                               });
     };
+    dragHandle.setTooltip (jp("アレンジ画面へドラッグして .mid を置きます。プラグイン画面が重なっている場所には落とせないので、"
+                               "画面を少し脇にどけて、トラックが見えている所までドラッグしてください。"));
+    saveButton.setTooltip (jp(".mid として保存します。ドラッグがうまくいかないときは保存してから読み込んでください。"));
     for (auto* b : std::initializer_list<juce::Component*> { &auditionButton, &stopButton, &dragHandle, &saveButton })
         addAndMakeVisible (b);
 }

@@ -77,6 +77,7 @@ private:
     // views live in native child windows, so nothing can be drawn over them).
     std::unique_ptr<ui::WavetableEditor> waveEditor;
 
+    std::unique_ptr<juce::TooltipWindow> tooltips;   // owned by the editor so it works inside a host
     ui::Scope scope;
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> fileChooser;

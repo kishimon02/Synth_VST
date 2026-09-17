@@ -170,7 +170,8 @@ private:
     juce::Viewport chatViewport;
     ChatList chatList;
     InputEditor input;
-    juce::TextButton presetsButton { "Presets" }, savePresetButton { "Save" }, sendButton { "Send" }, cancelButton { "Cancel" };
+    juce::TextButton presetsButton { "Presets" }, savePresetButton { "Save" }, pasteButton { "Paste" },
+                     sendButton { "Send" }, cancelButton { "Cancel" };
     juce::OwnedArray<juce::TextButton> quickButtons;
 
     // Model / reasoning effort bar under the input box.
