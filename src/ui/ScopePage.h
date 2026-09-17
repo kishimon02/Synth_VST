@@ -32,10 +32,10 @@ public:
 private:
     bool refillEveryFrame() const override { return true; }
 
-    bool buildVertices (std::vector<float>& verts, int& numLines, int& pointsPerLine) override
+    bool buildVertices (std::vector<float>& verts, int& outLines, int& outPoints) override
     {
-        numLines = numRows;
-        pointsPerLine = pointsPerRow;
+        outLines = numRows;
+        outPoints = pointsPerRow;
         verts.resize ((size_t) numRows * pointsPerRow * 3);
         const juce::ScopedLock sl (lock);
         size_t k = 0;

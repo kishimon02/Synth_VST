@@ -117,15 +117,29 @@ private:
         int textHeight = 20;
     };
 
+    // "Waiting for the reply" bubble shown at the end of the chat while a request is in flight.
+    class PendingView final : public juce::Component
+    {
+    public:
+        void begin() { startTime = juce::Time::getMillisecondCounter(); }
+        void paint (juce::Graphics&) override;
+        static int preferredHeight() { return 44; }
+    private:
+        juce::uint32 startTime = 0;
+    };
+
     class ChatList final : public juce::Component
     {
     public:
-        explicit ChatList (AiPage& p) : page (p) {}
+        explicit ChatList (AiPage& p) : page (p) { addChildComponent (pending); }
         void rebuild (const std::vector<ai::ChatMessage>&);
         void layoutFor (int width);
+        void setPending (bool busy);
+        void tick() { if (pending.isVisible()) pending.repaint(); }
     private:
         AiPage& page;
         std::vector<std::unique_ptr<MessageView>> views;
+        PendingView pending;
         size_t built = 0;
     };
 
@@ -134,6 +148,7 @@ private:
     void refreshAll();
     void sendInput();
     void quick (const juce::String& category);
+    void insertRequest (const juce::String& text);
     void showPresetsMenu();
     void saveInputAsPreset();
     void addMidiFile (const juce::File&);

@@ -47,7 +47,8 @@ AiPage::AiPage (WaveForgeProcessor& p)
 
     hintLabel.setColour (juce::Label::textColourId, colours::textDim);
     hintLabel.setFont (juce::FontOptions (11.5f));
-    hintLabel.setText (jp("Rec で演奏 / 再生中の MIDI を取り込み、.mid をここにドロップすると他トラックも渡せます。Enter で送信、Shift+Enter で改行。"),
+    hintLabel.setText (jp("Rec で演奏 / 再生中の MIDI を取り込み、.mid をここにドロップすると他トラックも渡せます。"
+                          "Presets とクイックボタンは入力欄に入るだけなので、書き足してから Send (Enter) で送信。Shift+Enter で改行。"),
                        juce::dontSendNotification);
     addAndMakeVisible (hintLabel);
 
@@ -140,6 +141,8 @@ void AiPage::timerCallback()
     }
     if (assistant.isBusy() != lastBusy)
         refreshAll();
+    else if (lastBusy)
+        chatList.tick();
 }
 
 void AiPage::refreshContextLabel()
@@ -154,21 +157,31 @@ void AiPage::refreshContextLabel()
 
 void AiPage::refreshAll()
 {
+    const bool wasBusy = lastBusy;
     lastBusy = assistant.isBusy();
     sendButton.setEnabled (! lastBusy);
+    sendButton.setButtonText (lastBusy ? jp("送信中...") : "Send");
     input.setEnabled (! lastBusy);
     cancelButton.setVisible (lastBusy);
-    usageLabel.setText (lastBusy ? jp("考え中...") : assistant.lastUsage(), juce::dontSendNotification);
+    usageLabel.setText (lastBusy ? jp("AI の回答を待っています...") : assistant.lastUsage(), juce::dontSendNotification);
     refreshContextLabel();
 
     const auto& history = assistant.history();
     chatList.rebuild (history);
+    chatList.setPending (lastBusy);
     chatList.layoutFor (chatViewport.getMaximumVisibleWidth());
-    if (history.size() != lastHistorySize)
+    if (history.size() != lastHistorySize || wasBusy != lastBusy)
     {
         lastHistorySize = history.size();
         chatViewport.setViewPosition (0, juce::jmax (0, chatList.getHeight() - chatViewport.getViewHeight()));
     }
+}
+
+void AiPage::insertRequest (const juce::String& text)
+{
+    input.setText (text);
+    input.moveCaretToEnd();
+    input.grabKeyboardFocus();
 }
 
 void AiPage::sendInput()
@@ -180,31 +193,25 @@ void AiPage::sendInput()
     assistant.send (text);
 }
 
+// Quick buttons and presets only fill the input; the user reviews / edits and presses Send.
 void AiPage::quick (const juce::String& category)
 {
     if (category == "*design")
     {
         const auto text = input.getText().trim();
-        if (text.isEmpty())
-        {
-            input.setText (jp("こんな音を作って: "));
-            input.moveCaretToEnd();
-            input.grabKeyboardFocus();
-            return;
-        }
-        assistant.send (jp("次の音を作って (param_changes と必要なら wavetable で): ") + text);
-        input.clear();
+        const auto prefix = jp("こんな音を作って: ");
+        insertRequest (text.isEmpty() || text.startsWith (prefix) ? prefix + text.fromFirstOccurrenceOf (prefix, false, false)
+                                                                   : prefix + text);
         return;
     }
     if (category == "*explain")
     {
-        assistant.send (ai::RequestPresets::firstText (jp("調整")).isEmpty() ? jp("今の音の仕組みを説明して")
-                        : jp("今の音の仕組みを、各セクションが何をしているか初心者向けに説明して。改善案があれば 2 つ挙げて (パラメータは変えないで)。"));
+        insertRequest (jp("今の音の仕組みを、各セクションが何をしているか初心者向けに説明して。改善案があれば 2 つ挙げて (パラメータは変えないで)。"));
         return;
     }
     const auto text = ai::RequestPresets::firstText (category);
     if (text.isNotEmpty())
-        assistant.send (text);
+        insertRequest (text);
 }
 
 void AiPage::showPresetsMenu()
@@ -251,9 +258,7 @@ void AiPage::showPresetsMenu()
                                 for (const auto& p : presets)
                                     if (p.category == category && id++ == result)
                                     {
-                                        input.setText (p.text);
-                                        input.moveCaretToEnd();
-                                        input.grabKeyboardFocus();
+                                        insertRequest (p.text);
                                         return;
                                     }
                         });
@@ -393,7 +398,52 @@ void AiPage::ChatList::layoutFor (int width)
         v->setBounds (4, y, width - 8, h);
         y += h + 6;
     }
+    if (pending.isVisible())
+    {
+        pending.setBounds (4, y, width - 8, PendingView::preferredHeight());
+        y += PendingView::preferredHeight() + 6;
+    }
     setSize (juce::jmax (1, width), juce::jmax (1, y));
+}
+
+void AiPage::ChatList::setPending (bool busy)
+{
+    if (busy && ! pending.isVisible())
+        pending.begin();
+    pending.setVisible (busy);
+}
+
+void AiPage::PendingView::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (colours::panelEdge.withAlpha (0.5f));
+    g.fillRoundedRectangle (r, 8.0f);
+    g.setColour (colours::accentFx.withAlpha (0.8f));
+    g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
+
+    auto inner = getLocalBounds().reduced (12, 6);
+    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    g.setColour (colours::accentFx);
+    g.drawText ("ASSISTANT", inner.removeFromTop (14), juce::Justification::centredLeft);
+
+    const auto elapsedMs = juce::Time::getMillisecondCounter() - startTime;
+    const int phase = (int) (elapsedMs / 300) % 4;
+
+    // three pulsing dots followed by the status text
+    auto line = inner.removeFromTop (18);
+    const float cy = (float) line.getCentreY();
+    for (int i = 0; i < 3; ++i)
+    {
+        const float alpha = i == phase ? 1.0f : 0.3f;
+        g.setColour (colours::accentFx.withAlpha (alpha));
+        g.fillEllipse ((float) line.getX() + (float) i * 12.0f, cy - 3.5f, 7.0f, 7.0f);
+    }
+    line.removeFromLeft (44);
+    g.setFont (juce::FontOptions (13.0f));
+    g.setColour (colours::text);
+    g.drawText (jp("AI の回答を待っています... ") + juce::String ((int) (elapsedMs / 1000)) + " s"
+                    + jp("   (Cancel で中止)"),
+                line, juce::Justification::centredLeft);
 }
 
 //==============================================================================

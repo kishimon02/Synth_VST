@@ -85,15 +85,15 @@ private:
         }
     }
 
-    bool buildVertices (std::vector<float>& verts, int& numLines, int& pointsPerLine) override
+    bool buildVertices (std::vector<float>& verts, int& outLines, int& outPoints) override
     {
-        numLines = cutoffLines;
-        pointsPerLine = points;
-        verts.resize ((size_t) numLines * points * 3);
+        outLines = cutoffLines;
+        outPoints = points;
+        verts.resize ((size_t) outLines * points * 3);
         size_t k = 0;
-        for (int line = 0; line < numLines; ++line)
+        for (int line = 0; line < outLines; ++line)
         {
-            const float pos = (float) line / (float) (numLines - 1);
+            const float pos = (float) line / (float) (outLines - 1);
             const float fc = minHz * std::pow (maxHz / minHz, pos);
             for (int i = 0; i < points; ++i)
             {
