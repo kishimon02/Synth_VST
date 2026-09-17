@@ -67,8 +67,14 @@ AiPage::AiPage (WaveForgeProcessor& p)
         SettingsDialogContent::show (this, [this] (const ai::Settings&) { assistant.reloadSettings(); refreshAll(); });
     };
     newChatButton.onClick = [this] { assistant.clearConversation(); };
-    for (auto* b : { &recButton, &clearCaptureButton, &addMidiButton, &clearTracksButton, &settingsButton, &newChatButton })
+    historyButton.onClick = [this] { showHistoryMenu(); };
+    for (auto* b : { &recButton, &clearCaptureButton, &addMidiButton, &clearTracksButton, &settingsButton,
+                     &newChatButton, &historyButton })
         addAndMakeVisible (b);
+
+    sessionLabel.setColour (juce::Label::textColourId, colours::textDim);
+    sessionLabel.setFont (juce::FontOptions (11.5f));
+    addAndMakeVisible (sessionLabel);
 
     chatViewport.setViewedComponent (&chatList, false);
     chatViewport.setScrollBarsShown (true, false);
@@ -150,14 +156,21 @@ void AiPage::refreshAll()
     refreshContextLabel();
 
     const auto& history = assistant.history();
-    chatList.rebuild (history);
+    const auto epoch = assistant.historyEpoch();
+    chatList.rebuild (history, epoch);
     chatList.setPending (lastBusy);
     chatList.layoutFor (chatViewport.getMaximumVisibleWidth());
-    if (history.size() != lastHistorySize || wasBusy != lastBusy)
+    if (history.size() != lastHistorySize || epoch != lastEpoch || wasBusy != lastBusy)
     {
         lastHistorySize = history.size();
+        lastEpoch = epoch;
         chatViewport.setViewPosition (0, juce::jmax (0, chatList.getHeight() - chatViewport.getViewHeight()));
     }
+
+    sessionLabel.setText (history.empty() ? jp("新しい会話")
+                                          : assistant.sessionStartTime().formatted ("%m/%d %H:%M") + jp(" の会話")
+                                                + (assistant.sessionFile() == juce::File() ? jp(" (未保存)") : juce::String()),
+                          juce::dontSendNotification);
 }
 
 void AiPage::setRequestText (const juce::String& text)
@@ -200,6 +213,73 @@ void AiPage::quick (const juce::String& category)
     const auto text = ai::RequestPresets::firstText (category);
     if (text.isNotEmpty())
         insertRequest (text);
+}
+
+// The last 30 days of conversations, newest first, grouped by day.
+void AiPage::showHistoryMenu()
+{
+    auto sessions = assistant.savedSessions();
+    juce::PopupMenu menu;
+
+    if (sessions.empty())
+    {
+        menu.addItem (9999, jp("保存された会話はありません"), false);
+    }
+    else
+    {
+        const auto today = juce::Time::getCurrentTime();
+        juce::PopupMenu day;
+        juce::String currentDay;
+        int id = 1;
+        auto flushDay = [&menu, &day, &currentDay]
+        {
+            if (currentDay.isNotEmpty())
+                menu.addSubMenu (currentDay, day);
+            day = juce::PopupMenu();
+        };
+
+        for (const auto& s : sessions)
+        {
+            const auto days = today.getDayOfYear() - s.updated.getDayOfYear();
+            const bool sameYear = today.getYear() == s.updated.getYear();
+            const auto label = sameYear && days == 0 ? jp("今日")
+                             : sameYear && days == 1 ? jp("昨日")
+                                                     : s.updated.formatted ("%m/%d");
+            if (label != currentDay)
+            {
+                flushDay();
+                currentDay = label;
+            }
+            day.addItem (id++, s.updated.formatted ("%H:%M") + "   " + s.title + "   ("
+                                   + juce::String (s.messageCount) + ")",
+                         true, s.file == assistant.sessionFile());
+        }
+        flushDay();
+    }
+
+    menu.addSeparator();
+    menu.addItem (9001, jp("保存フォルダを開く"));
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&historyButton),
+                        [this, sessions] (int result)
+                        {
+                            if (result <= 0)
+                                return;
+                            if (result == 9001)
+                            {
+                                auto dir = ai::ChatStore::directory();
+                                dir.createDirectory();
+                                dir.revealToUser();
+                                return;
+                            }
+                            const int index = result - 1;
+                            if (! juce::isPositiveAndBelow (index, (int) sessions.size()))
+                                return;
+                            juce::String error;
+                            if (! assistant.loadSession (sessions[(size_t) index].file, error))
+                                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                                        "History", error);
+                        });
 }
 
 void AiPage::showPresetsMenu()
@@ -323,9 +403,11 @@ void AiPage::resized()
     auto r = getLocalBounds().reduced (10, 8);
 
     auto top = r.removeFromTop (26);
-    title.setBounds (top.removeFromLeft (110));
-    newChatButton.setBounds (top.removeFromRight (80).reduced (2, 1));
-    settingsButton.setBounds (top.removeFromRight (80).reduced (2, 1));
+    title.setBounds (top.removeFromLeft (104));
+    newChatButton.setBounds (top.removeFromRight (82).reduced (2, 1));
+    settingsButton.setBounds (top.removeFromRight (78).reduced (2, 1));
+    historyButton.setBounds (top.removeFromRight (78).reduced (2, 1));
+    sessionLabel.setBounds (top.removeFromLeft (juce::jmin (210, top.getWidth() / 2)));
     usageLabel.setBounds (top);
 
     r.removeFromTop (4);
@@ -361,12 +443,13 @@ void AiPage::resized()
 }
 
 //==============================================================================
-void AiPage::ChatList::rebuild (const std::vector<ai::ChatMessage>& history)
+void AiPage::ChatList::rebuild (const std::vector<ai::ChatMessage>& history, juce::uint32 epoch)
 {
-    if (history.size() < built)
+    if (history.size() < built || epoch != builtEpoch)
     {
         views.clear();
         built = 0;
+        builtEpoch = epoch;
     }
     for (size_t i = built; i < history.size(); ++i)
     {

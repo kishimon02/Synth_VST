@@ -9,6 +9,7 @@ Assistant::Assistant (WaveForgeProcessor& p) : processor (p)
 {
     settings = Settings::load();
     catalogText = ParamCatalog::describe (processor.getAPVTS());
+    ChatStore::prune();
 }
 
 Assistant::~Assistant()
@@ -27,7 +28,39 @@ void Assistant::clearConversation()
 {
     messages.clear();
     llmHistory.clear();
+    sessionPath = juce::File();
+    sessionStarted = juce::Time::getCurrentTime();
+    ++epoch;
     if (onChanged) onChanged();
+}
+
+// Conversations live in %APPDATA%/WaveForge/Chats, one file per session.
+void Assistant::saveSession()
+{
+    juce::String error;
+    ChatStore::save (sessionPath, sessionStarted, messages, llmHistory, error);
+}
+
+bool Assistant::loadSession (const juce::File& file, juce::String& error)
+{
+    if (busy.load())
+    {
+        error = juce::String (juce::CharPointer_UTF8 ("送信中は会話を切り替えられません。"));
+        return false;
+    }
+    std::vector<ChatMessage> loadedMessages;
+    std::vector<LlmMessage> loadedHistory;
+    juce::Time started;
+    if (! ChatStore::load (file, loadedMessages, loadedHistory, started, error))
+        return false;
+
+    messages = std::move (loadedMessages);
+    llmHistory = std::move (loadedHistory);
+    sessionPath = file;
+    sessionStarted = started;
+    ++epoch;
+    if (onChanged) onChanged();
+    return true;
 }
 
 void Assistant::cancel()
@@ -81,6 +114,7 @@ void Assistant::send (const juce::String& userTextIn)
     req.messages = llmHistory;
     req.schema = ReplyFormat::schema();
 
+    saveSession();
     busy.store (true);
     cancelFlag.store (false);
     if (onChanged) onChanged();
@@ -124,6 +158,7 @@ void Assistant::deliver (LlmResult result)
                   + ")  out " + juce::String (result.outputTokens);
     }
     messages.push_back (reply);
+    saveSession();
     if (onChanged) onChanged();
 }
 

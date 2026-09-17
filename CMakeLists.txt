@@ -69,6 +69,7 @@ set(WAVEFORGE_AI_SOURCES
     src/ai/MusicContext.cpp
     src/ai/MidiExport.cpp
     src/ai/ReplyFormat.cpp
+    src/ai/ChatStore.cpp
 )
 
 set(WAVEFORGE_DSP_SOURCES

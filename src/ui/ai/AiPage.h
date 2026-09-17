@@ -135,7 +135,7 @@ private:
     {
     public:
         explicit ChatList (AiPage& p) : page (p) { addChildComponent (pending); }
-        void rebuild (const std::vector<ai::ChatMessage>&);
+        void rebuild (const std::vector<ai::ChatMessage>&, juce::uint32 epoch);
         void layoutFor (int width);
         void setPending (bool busy);
         void tick() { if (pending.isVisible()) pending.repaint(); }
@@ -144,6 +144,7 @@ private:
         std::vector<std::unique_ptr<MessageView>> views;
         PendingView pending;
         size_t built = 0;
+        juce::uint32 builtEpoch = 0;
     };
 
     //==========================================================================
@@ -153,6 +154,7 @@ private:
     void quick (const juce::String& category);
     void insertRequest (const juce::String& text);
     void showPresetsMenu();
+    void showHistoryMenu();
     void saveInputAsPreset();
     void addMidiFile (const juce::File&);
     void refreshContextLabel();
@@ -160,9 +162,10 @@ private:
     WaveForgeProcessor& processor;
     ai::Assistant& assistant;
 
-    juce::Label title { {}, "AI ASSISTANT" }, contextLabel, usageLabel, hintLabel;
+    juce::Label title { {}, "AI ASSISTANT" }, contextLabel, usageLabel, hintLabel, sessionLabel;
     juce::TextButton recButton { "Rec" }, clearCaptureButton { "Clear" }, addMidiButton { "Add .mid..." },
-                     clearTracksButton { "Clear tracks" }, settingsButton { "Settings" }, newChatButton { "New chat" };
+                     clearTracksButton { "Clear tracks" }, settingsButton { "Settings" }, newChatButton { "New chat" },
+                     historyButton { "History" };
     juce::Viewport chatViewport;
     ChatList chatList;
     InputEditor input;
@@ -171,6 +174,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     bool dragOver = false;
     size_t lastHistorySize = 0;
+    juce::uint32 lastEpoch = 0;
     bool lastBusy = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AiPage)

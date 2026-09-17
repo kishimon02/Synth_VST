@@ -22,6 +22,7 @@
 #include "ai/ParamCatalog.h"
 #include "ai/RequestPresets.h"
 #include "ai/ChordLibrary.h"
+#include "ai/ChatStore.h"
 #include "ai/MusicContext.h"
 #include "ai/MidiExport.h"
 #include "ai/ReplyFormat.h"
@@ -1305,6 +1306,165 @@ public:
     }
 };
 
+//==============================================================================
+// Saved conversations: JSON round trip, listing and the 30 day retention.
+class ChatStoreTest final : public juce::UnitTest
+{
+public:
+    ChatStoreTest() : juce::UnitTest ("Chat store / saved conversations") {}
+
+    static ai::ChatMessage makeReply()
+    {
+        ai::ChatMessage m;
+        m.role = ai::ChatMessage::assistant;
+        m.text = "4 bars for you";
+        m.notesKind = "melody";
+        m.notes.push_back ({ 60, 0.0f, 1.0f, 100 });
+        m.notes.push_back ({ 64, 1.0f, 0.5f, 88 });
+        m.presetName = "Bright Lead";
+
+        juce::Array<juce::var> changes;
+        auto* c = new juce::DynamicObject();
+        c->setProperty ("id", "filter_cutoff");
+        c->setProperty ("value", 1200.0);
+        changes.add (juce::var (c));
+        m.paramChanges = changes;
+
+        m.arpPattern.name = "Trance";
+        m.arpPattern.steps.push_back ({ wf::ArpStep::note, 1.0f, 0.5f, 0 });
+        m.arpPattern.steps.push_back ({ wf::ArpStep::rest, 0.5f, 0.5f, 0 });
+        return m;
+    }
+
+    void runTest() override
+    {
+        beginTest ("a message survives the JSON round trip with its cards");
+        {
+            const auto original = makeReply();
+            ai::ChatMessage back;
+            expect (ai::ChatStore::fromVar (ai::ChatStore::toVar (original), back), "parses back");
+            expect (back.role == ai::ChatMessage::assistant);
+            expectEquals (back.text, original.text);
+            expectEquals (back.notesKind, juce::String ("melody"));
+            expectEquals ((int) back.notes.size(), 2);
+            expectEquals (back.notes[1].pitch, 64);
+            expectWithinAbsoluteError (back.notes[1].startBeat, 1.0f, 0.001f);
+            expectWithinAbsoluteError (back.notes[1].durationBeats, 0.5f, 0.001f);
+            expectEquals (back.notes[1].velocity, 88);
+            expect (back.hasParamChanges(), "parameter changes survive");
+            expectEquals (back.paramChanges[0].getProperty ("id", "").toString(), juce::String ("filter_cutoff"));
+            expect (back.hasArpPattern() && back.arpPattern.steps.size() == 2, "arp pattern survives");
+            expect (back.arpPattern.steps[1].kind == wf::ArpStep::rest, "step kinds survive");
+            expectEquals (back.presetName, juce::String ("Bright Lead"));
+
+            ai::ChatMessage error;
+            error.role = ai::ChatMessage::system;
+            error.isError = true;
+            error.text = "401";
+            ai::ChatMessage errorBack;
+            expect (ai::ChatStore::fromVar (ai::ChatStore::toVar (error), errorBack), "error entry parses");
+            expect (errorBack.isError && errorBack.role == ai::ChatMessage::system, "errors stay errors");
+        }
+
+        beginTest ("a session round trips through a file, keeping the model history");
+        {
+            auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("WaveForgeChatTest");
+            dir.deleteRecursively();
+            dir.createDirectory();
+
+            std::vector<ai::ChatMessage> messages;
+            ai::ChatMessage user;
+            user.role = ai::ChatMessage::user;
+            user.text = "make me a melody";
+            messages.push_back (user);
+            messages.push_back (makeReply());
+
+            std::vector<ai::LlmMessage> llm { { "user", "make me a melody" }, { "assistant", "{\"reply\":\"ok\"}" } };
+
+            auto file = dir.getChildFile ("chat-test.json");
+            juce::String error;
+            expect (ai::ChatStore::save (file, juce::Time::getCurrentTime(), messages, llm, error), error);
+            expect (file.existsAsFile(), "the file is written");
+            expect (! file.loadFileAsString().contains ("\"llm\": []"), "the model history is written");
+
+            std::vector<ai::ChatMessage> loaded;
+            std::vector<ai::LlmMessage> loadedLlm;
+            juce::Time started;
+            expect (ai::ChatStore::load (file, loaded, loadedLlm, started, error), error);
+            expectEquals ((int) loaded.size(), 2);
+            expectEquals (loaded[0].text, juce::String ("make me a melody"));
+            expect (loaded[1].hasNotes(), "the reply still carries its notes");
+            expectEquals ((int) loadedLlm.size(), 2, "the model history comes back");
+            expectEquals (loadedLlm[1].content, juce::String ("{\"reply\":\"ok\"}"));
+
+            expectEquals (ai::ChatStore::titleFor (messages), juce::String ("make me a melody"), "title is the request");
+
+            // the file name is derived from the start time when there is none yet
+            juce::File unnamed;
+            expect (ai::ChatStore::save (unnamed, juce::Time::getCurrentTime(), messages, llm, error), error);
+            expect (unnamed.getFileName().startsWith ("chat-") && unnamed.hasFileExtension ("json"), "named by date");
+            unnamed.deleteFile();
+
+            juce::File missing = dir.getChildFile ("nope.json");
+            expect (! ai::ChatStore::load (missing, loaded, loadedLlm, started, error), "a missing file fails");
+            expect (error.isNotEmpty(), "with a message");
+
+            dir.deleteRecursively();
+        }
+
+        beginTest ("listing is newest first and old sessions are pruned after 30 days");
+        {
+            auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("WaveForgeChatList");
+            dir.deleteRecursively();
+            dir.createDirectory();
+
+            std::vector<ai::ChatMessage> messages;
+            ai::ChatMessage user;
+            user.role = ai::ChatMessage::user;
+            std::vector<ai::LlmMessage> llm;
+            juce::String error;
+
+            const auto now = juce::Time::getCurrentTime();
+            auto write = [&] (const juce::String& fileName, const juce::String& text, juce::Time when)
+            {
+                messages.clear();
+                user.text = text;
+                messages.push_back (user);
+                auto file = dir.getChildFile (fileName);
+                expect (ai::ChatStore::save (file, when, messages, llm, error), error);
+                return file;
+            };
+
+            auto recent = write ("a.json", "today", now);
+            auto older = write ("b.json", "last week", now - juce::RelativeTime::days (7));
+            auto ancient = write ("c.json", "ages ago", now - juce::RelativeTime::days (40));
+            // `updated` is written as "now", so age the two old ones by hand
+            auto age = [] (const juce::File& f, int days)
+            {
+                auto root = juce::JSON::parse (f.loadFileAsString());
+                if (auto* o = root.getDynamicObject())
+                    o->setProperty ("updated",
+                                    (juce::Time::getCurrentTime() - juce::RelativeTime::days (days)).toISO8601 (true));
+                f.replaceWithText (juce::JSON::toString (root));
+            };
+            age (older, 7);
+            age (ancient, 40);
+
+            auto sessions = ai::ChatStore::list (dir);
+            expectEquals ((int) sessions.size(), 2, "the 40 day old session is outside the window");
+            expectEquals (sessions[0].title, juce::String ("today"), "newest first");
+            expectEquals (sessions[1].title, juce::String ("last week"));
+            expectEquals (sessions[0].messageCount, 1);
+
+            expectEquals (ai::ChatStore::prune (dir, 30), 1, "one session deleted");
+            expect (! ancient.existsAsFile(), "the old file is gone");
+            expect (recent.existsAsFile() && older.existsAsFile(), "the others are kept");
+
+            dir.deleteRecursively();
+        }
+    }
+};
+
 struct StdoutRunner final : public juce::UnitTestRunner
 {
     void logMessage (const juce::String& m) override { std::cout << m << std::endl; }
@@ -1322,6 +1482,7 @@ static WarpTest warpTest;
 static ArpeggiatorTest arpeggiatorTest;
 static AiTest aiTest;
 static ChordLibraryTest chordLibraryTest;
+static ChatStoreTest chatStoreTest;
 static PresetTest presetTest;
 
 int main()
