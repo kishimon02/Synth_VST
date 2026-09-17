@@ -13,11 +13,24 @@ namespace
 
     juce::ParameterID id (const juce::String& s) { return { s, version }; }
 
+    // Display precision that follows the magnitude, so 20000 Hz does not
+    // become "20000.000000" and 0.25 does not become "0".
+    juce::String formatValue (float v, int)
+    {
+        const float a = std::abs (v);
+        if (a >= 1000.0f) return juce::String (juce::roundToInt (v));
+        if (a >= 100.0f)  return juce::String (v, 1);
+        if (a >= 10.0f)   return juce::String (v, 2);
+        return juce::String (v, 3);
+    }
+
     std::unique_ptr<juce::AudioParameterFloat> flt (const juce::String& pid, const juce::String& name,
                                                     Range range, float def, const juce::String& label = {})
     {
         return std::make_unique<juce::AudioParameterFloat> (id (pid), name, range, def,
-                                                            juce::AudioParameterFloatAttributes().withLabel (label));
+                                                            juce::AudioParameterFloatAttributes()
+                                                                .withLabel (label)
+                                                                .withStringFromValueFunction (formatValue));
     }
     std::unique_ptr<juce::AudioParameterInt> integer (const juce::String& pid, const juce::String& name,
                                                       int lo, int hi, int def, const juce::String& label = {})

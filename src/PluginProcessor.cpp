@@ -116,6 +116,9 @@ void WaveForgeProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     masterGain.setTargetValue (params.global.masterGain);
     masterGain.applyGain (buffer, numSamples);
 
+    scope.push (buffer.getReadPointer (0),
+                buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : nullptr, numSamples);
+
     diag.blockEnd (buffer, numSamples);
 }
 

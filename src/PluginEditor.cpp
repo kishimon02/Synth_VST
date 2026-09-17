@@ -1,16 +1,83 @@
 #include "PluginEditor.h"
 
+//==============================================================================
+WaveForgeEditor::OscPage::OscPage (WaveForgeProcessor& p)
+    : oscA (p, 0), oscB (p, 1),
+      subNoise (p.getAPVTS()), filter (p.getAPVTS()),
+      env1 (p.getAPVTS(), 0), env2 (p.getAPVTS(), 1), global (p.getAPVTS())
+{
+    for (auto* c : std::initializer_list<juce::Component*> { &oscA, &oscB, &subNoise, &filter, &env1, &env2, &global })
+        addAndMakeVisible (c);
+}
+
+void WaveForgeEditor::OscPage::resized()
+{
+    auto r = getLocalBounds();
+    const int gap = 6;
+
+    auto bottom = r.removeFromBottom (186);
+    r.removeFromBottom (gap);
+
+    auto oscs = r;
+    const int half = (oscs.getWidth() - gap) / 2;
+    oscA.setBounds (oscs.removeFromLeft (half));
+    oscs.removeFromLeft (gap);
+    oscB.setBounds (oscs);
+
+    // bottom row: sub/noise | filter | env1 | env2 | global  (weights)
+    const float weights[5] = { 1.1f, 1.75f, 0.9f, 0.9f, 0.7f };
+    float total = 0.0f;
+    for (float w : weights) total += w;
+    const int usable = bottom.getWidth() - gap * 4;
+    juce::Component* comps[5] = { &subNoise, &filter, &env1, &env2, &global };
+    for (int i = 0; i < 5; ++i)
+    {
+        const int w = i == 4 ? bottom.getWidth() : (int) ((float) usable * weights[i] / total);
+        comps[i]->setBounds (bottom.removeFromLeft (w));
+        bottom.removeFromLeft (gap);
+    }
+}
+
+WaveForgeEditor::ModPage::ModPage (juce::AudioProcessorValueTreeState& a)
+    : lfo1 (a, 0), lfo2 (a, 1), matrix (a)
+{
+    for (auto* c : std::initializer_list<juce::Component*> { &lfo1, &lfo2, &matrix })
+        addAndMakeVisible (c);
+}
+
+void WaveForgeEditor::ModPage::resized()
+{
+    auto r = getLocalBounds();
+    auto top = r.removeFromTop (150);
+    r.removeFromTop (6);
+    const int half = (top.getWidth() - 6) / 2;
+    lfo1.setBounds (top.removeFromLeft (half));
+    top.removeFromLeft (6);
+    lfo2.setBounds (top);
+    matrix.setBounds (r);
+}
+
+//==============================================================================
 WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     : AudioProcessorEditor (p),
       processor (p),
-      genericParams (p),
+      oscPage (p), modPage (p.getAPVTS()), fxPage (p.getAPVTS()),
+      scope (p.getScopeBuffer()),
       keyboard (p.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard)
 {
-    title.setFont (juce::FontOptions (18.0f, juce::Font::bold));
-    title.setJustificationType (juce::Justification::centredLeft);
+    setLookAndFeel (&lookAndFeel);
+
+    title.setText ("WaveForge", juce::dontSendNotification);
+    title.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+    title.setColour (juce::Label::textColourId, ui::colours::accent);
     addAndMakeVisible (title);
 
+    status.setFont (juce::FontOptions (12.0f));
+    status.setColour (juce::Label::textColourId, ui::colours::textDim);
+    addAndMakeVisible (status);
+
     presetLabel.setJustificationType (juce::Justification::centredRight);
+    presetLabel.setColour (juce::Label::textColourId, ui::colours::textDim);
     addAndMakeVisible (presetLabel);
 
     presetBox.setTextWhenNothingSelected ("(custom)");
@@ -28,87 +95,50 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     addAndMakeVisible (loadPresetButton);
     refreshPresetMenu();
 
-    for (int i = 0; i < 2; ++i)
-    {
-        auto& row = oscRows[i];
-        row.label.setText (i == 0 ? "OSC A" : "OSC B", juce::dontSendNotification);
-        row.label.setFont (juce::FontOptions (15.0f, juce::Font::bold));
-        addAndMakeVisible (row.label);
+    tabs.addTab ("OSC", ui::colours::background, &oscPage, false);
+    tabs.addTab ("MOD", ui::colours::background, &modPage, false);
+    tabs.addTab ("FX",  ui::colours::background, &fxPage,  false);
+    tabs.setTabBarDepth (30);
+    tabs.setOutline (0);
+    addAndMakeVisible (tabs);
 
-        row.tableBox.onChange = [this, i]
-        {
-            const int index = oscRows[i].tableBox.getSelectedId() - 1;
-            if (index >= 0 && index != processor.getOscTableIndex (i))
-                processor.setOscTable (i, index);
-        };
-        addAndMakeVisible (row.tableBox);
-
-        row.loadButton.onClick = [this, i] { chooseFile (i); };
-        addAndMakeVisible (row.loadButton);
-        addAndMakeVisible (row.view);
-    }
-
-    {
-        namespace F = ParamID::Fx;
-        struct Def { const char* name; const char* enableId; const char* mixId; };
-        const Def defs[5] = { { "Distortion", F::distEnabled,   F::distMix },
-                              { "EQ",         F::eqEnabled,     nullptr },
-                              { "Chorus",     F::chorusEnabled, F::chorusMix },
-                              { "Delay",      F::delayEnabled,  F::delayMix },
-                              { "Reverb",     F::reverbEnabled, F::reverbMix } };
-
-        fxLabel.setFont (juce::FontOptions (15.0f, juce::Font::bold));
-        addAndMakeVisible (fxLabel);
-
-        auto& apvts = p.getAPVTS();
-        for (int i = 0; i < 5; ++i)
-        {
-            auto& s = fxStrips[i];
-            s.label.setText (defs[i].name, juce::dontSendNotification);
-            s.label.setJustificationType (juce::Justification::centred);
-            addAndMakeVisible (s.label);
-
-            s.enableAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
-                apvts, defs[i].enableId, s.enable);
-            addAndMakeVisible (s.enable);
-
-            s.mix.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-            s.mix.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 50, 16);
-            if (defs[i].mixId != nullptr)
-            {
-                s.mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-                    apvts, defs[i].mixId, s.mix);
-                addAndMakeVisible (s.mix);
-            }
-        }
-    }
-
-    paramViewport.setViewedComponent (&genericParams, false);
-    paramViewport.setScrollBarsShown (true, false);
-    addAndMakeVisible (paramViewport);
+    addAndMakeVisible (scope);
 
     keyboard.setKeyWidth (22.0f);
     keyboard.setAvailableRange (24, 108);
+    keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, ui::colours::accent.withAlpha (0.7f));
+    keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, ui::colours::accent.withAlpha (0.3f));
     addAndMakeVisible (keyboard);
 
     processor.addChangeListener (this);
-    refreshTableCombos();
     startTimerHz (30);
 
     setResizable (true, true);
-    setResizeLimits (800, 640, 1800, 1200);
-    setSize (1000, 820);
+    setResizeLimits (1040, 720, 1800, 1200);
+    setSize (1160, 800);
 }
 
 WaveForgeEditor::~WaveForgeEditor()
 {
     processor.removeChangeListener (this);
+    setLookAndFeel (nullptr);
 }
 
+//==============================================================================
 void WaveForgeEditor::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    refreshTableCombos();
+    oscPage.oscA.refresh();
+    oscPage.oscB.refresh();
     refreshPresetMenu();
+}
+
+void WaveForgeEditor::timerCallback()
+{
+    oscPage.oscA.tick();
+    oscPage.oscB.tick();
+    status.setText ("voices " + juce::String (processor.getActiveVoiceCount())
+                        + "    " + juce::String (processor.getHostBpm(), 1) + " BPM",
+                    juce::dontSendNotification);
 }
 
 void WaveForgeEditor::refreshPresetMenu()
@@ -175,102 +205,31 @@ void WaveForgeEditor::loadPresetFile()
                               });
 }
 
-void WaveForgeEditor::refreshTableCombos()
-{
-    auto& bank = processor.getBank();
-    for (int i = 0; i < 2; ++i)
-    {
-        auto& box = oscRows[i].tableBox;
-        box.clear (juce::dontSendNotification);
-        for (int t = 0; t < bank.size(); ++t)
-            box.addItem (bank.nameAt (t), t + 1);
-        box.setSelectedId (processor.getOscTableIndex (i) + 1, juce::dontSendNotification);
-        oscRows[i].view.setTable (processor.getOscTable (i));
-    }
-}
-
-void WaveForgeEditor::chooseFile (int osc)
-{
-    fileChooser = std::make_unique<juce::FileChooser> ("Load wavetable (.wav, 2048 samples per frame)",
-                                                       juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
-                                                       "*.wav");
-    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                              [this, osc] (const juce::FileChooser& fc)
-                              {
-                                  const auto file = fc.getResult();
-                                  if (! file.existsAsFile())
-                                      return;
-                                  juce::String error;
-                                  if (! processor.loadWavetableFile (osc, file, error))
-                                      juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
-                                                                              "Wavetable", error);
-                              });
-}
-
-void WaveForgeEditor::timerCallback()
-{
-    auto& apvts = processor.getAPVTS();
-    for (int i = 0; i < 2; ++i)
-    {
-        oscRows[i].view.setTable (processor.getOscTable (i));
-        if (auto* pos = apvts.getRawParameterValue (ParamID::osc (i).wtPos))
-            oscRows[i].view.setPosition (pos->load());
-    }
-    title.setText ("WaveForge  -  Phase 3 (FX chain)    voices: "
-                       + juce::String (processor.getActiveVoiceCount())
-                       + "    " + juce::String (processor.getHostBpm(), 1) + " BPM",
-                   juce::dontSendNotification);
-}
-
+//==============================================================================
 void WaveForgeEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff1e1f26));
+    g.fillAll (ui::colours::background);
 }
 
 void WaveForgeEditor::resized()
 {
-    auto area = getLocalBounds().reduced (10);
+    auto area = getLocalBounds().reduced (8);
 
-    auto top = area.removeFromTop (28);
-    auto presetArea = top.removeFromRight (juce::jmin (440, top.getWidth() / 2));
-    loadPresetButton.setBounds (presetArea.removeFromRight (80).reduced (2, 0));
-    savePresetButton.setBounds (presetArea.removeFromRight (90).reduced (2, 0));
-    presetLabel.setBounds (presetArea.removeFromLeft (55));
-    presetBox.setBounds (presetArea.reduced (2, 0));
-    title.setBounds (top);
+    auto top = area.removeFromTop (30);
+    auto presetArea = top.removeFromRight (juce::jmin (460, top.getWidth() / 2));
+    loadPresetButton.setBounds (presetArea.removeFromRight (78).reduced (2, 2));
+    savePresetButton.setBounds (presetArea.removeFromRight (88).reduced (2, 2));
+    presetLabel.setBounds (presetArea.removeFromLeft (52));
+    presetBox.setBounds (presetArea.reduced (2, 3));
+    title.setBounds (top.removeFromLeft (120));
+    status.setBounds (top);
 
-    area.removeFromTop (6);
-    keyboard.setBounds (area.removeFromBottom (80));
-    area.removeFromBottom (8);
+    area.removeFromTop (4);
+    auto footer = area.removeFromBottom (86);
+    area.removeFromBottom (6);
+    scope.setBounds (footer.removeFromLeft (220));
+    footer.removeFromLeft (6);
+    keyboard.setBounds (footer);
 
-    auto oscArea = area.removeFromTop (150);
-    const int colW = oscArea.getWidth() / 2;
-    for (int i = 0; i < 2; ++i)
-    {
-        auto col = oscArea.removeFromLeft (colW).reduced (4);
-        auto& row = oscRows[i];
-        auto header = col.removeFromTop (26);
-        row.label.setBounds (header.removeFromLeft (60));
-        row.loadButton.setBounds (header.removeFromRight (90));
-        row.tableBox.setBounds (header.reduced (4, 0));
-        col.removeFromTop (4);
-        row.view.setBounds (col);
-    }
-
-    area.removeFromTop (8);
-    auto fxArea = area.removeFromTop (78);
-    fxLabel.setBounds (fxArea.removeFromLeft (40));
-    const int stripW = fxArea.getWidth() / 5;
-    for (auto& s : fxStrips)
-    {
-        auto col = fxArea.removeFromLeft (stripW).reduced (4, 0);
-        s.label.setBounds (col.removeFromTop (18));
-        auto left = col.removeFromLeft (col.getWidth() / 2);
-        s.enable.setBounds (left.withSizeKeepingCentre (60, 24));
-        s.mix.setBounds (col);
-    }
-
-    area.removeFromTop (8);
-    paramViewport.setBounds (area);
-    genericParams.setSize (area.getWidth() - paramViewport.getScrollBarThickness(), genericParams.getHeight());
+    tabs.setBounds (area);
 }

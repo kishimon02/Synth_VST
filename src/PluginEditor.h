@@ -4,11 +4,12 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "PluginProcessor.h"
-#include "ui/WavetableView2D.h"
+#include "ui/LookAndFeel.h"
+#include "ui/Panels.h"
+#include "ui/Scope.h"
 
-// Phase 1 interim editor: wavetable selection + 2D preview per oscillator,
-// a generic parameter list for everything else, and the on-screen keyboard.
-// The designed UI (tabs, knobs, 3D view) lands in Phase 4.
+// Main editor: header (title, preset bar), three tabbed pages (OSC / MOD /
+// FX), and a footer with the output scope and the on-screen keyboard.
 class WaveForgeEditor final : public juce::AudioProcessorEditor,
                               private juce::ChangeListener,
                               private juce::Timer
@@ -23,44 +24,45 @@ public:
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
-    void refreshTableCombos();
     void refreshPresetMenu();
-    void chooseFile (int osc);
     void savePresetAs();
     void loadPresetFile();
 
-    struct OscRow
+    // Pages hosted by the tabbed component.
+    struct OscPage final : public juce::Component
     {
-        juce::Label      label;
-        juce::ComboBox   tableBox;
-        juce::TextButton loadButton { "Load .wav" };
-        WavetableView2D  view;
+        explicit OscPage (WaveForgeProcessor&);
+        void resized() override;
+        ui::OscPanel oscA, oscB;
+        ui::SubNoisePanel subNoise;
+        ui::FilterPanel filter;
+        ui::EnvPanel env1, env2;
+        ui::GlobalPanel global;
+    };
+
+    struct ModPage final : public juce::Component
+    {
+        explicit ModPage (juce::AudioProcessorValueTreeState&);
+        void resized() override;
+        ui::LfoPanel lfo1, lfo2;
+        ui::ModMatrixPanel matrix;
     };
 
     WaveForgeProcessor& processor;
-    juce::Label title;
+    ui::WaveForgeLookAndFeel lookAndFeel;
 
+    juce::Label title, status;
     juce::Label      presetLabel { {}, "Preset" };
     juce::ComboBox   presetBox;
     juce::TextButton savePresetButton { "Save As..." };
     juce::TextButton loadPresetButton { "Load..." };
 
-    // One column per FX unit: on/off + mix. The full parameter set is in the
-    // generic list below; this strip is for quick A/B while auditioning.
-    struct FxStrip
-    {
-        juce::Label        label;
-        juce::ToggleButton enable { "On" };
-        juce::Slider       mix;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> enableAttachment;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
-    };
+    juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
+    OscPage oscPage;
+    ModPage modPage;
+    ui::FxPage fxPage;
 
-    OscRow oscRows[2];
-    juce::Label fxLabel { {}, "FX" };
-    FxStrip fxStrips[5];
-    juce::Viewport paramViewport;
-    juce::GenericAudioProcessorEditor genericParams;
+    ui::Scope scope;
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> fileChooser;
 

@@ -10,6 +10,7 @@
 #include "Diagnostics.h"
 #include "dsp/SynthEngine.h"
 #include "dsp/fx/FxChain.h"
+#include "ui/Scope.h"
 
 class WaveForgeProcessor final : public juce::AudioProcessor,
                                  public juce::ChangeBroadcaster,   // fires when a wavetable assignment changes
@@ -47,6 +48,7 @@ public:
     juce::AudioProcessorValueTreeState& getAPVTS() noexcept { return apvts; }
     juce::MidiKeyboardState& getKeyboardState() noexcept { return keyboardState; }
     WavetableBank& getBank() noexcept { return bank; }
+    const ui::ScopeBuffer& getScopeBuffer() const noexcept { return scope; }
 
     int  getOscTableIndex (int osc) const noexcept { return oscTableIndex[osc]; }
     const wf::Wavetable* getOscTable (int osc) const noexcept { return oscTable[osc].load (std::memory_order_relaxed); }
@@ -74,6 +76,7 @@ private:
     WavetableBank bank;
     wf::SynthEngine engine;
     wf::FxChain fx;
+    ui::ScopeBuffer scope;
 
     std::atomic<const wf::Wavetable*> oscTable[2] { nullptr, nullptr };
     int oscTableIndex[2] { 0, 0 };

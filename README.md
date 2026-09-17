@@ -75,7 +75,7 @@ FX (ディレイのサンプル精度とフィードバック、EQ の利得、�
 - Phase 0 (環境・骨組み) 完了
 - Phase 1 (ウェーブテーブル・エンジン) 完了: WT Osc A/B (ユニゾン 8 まで、ミップマップ帯域制限)、Sub、Noise、
   SVF フィルター (LP/HP/BP 12/24dB、ドライブ、キートラック、Env2 モジュレーション)、ADSR×2、Serum 互換 .wav 読込、
-  内蔵テーブル (Basic Shapes / Sine / Harmonics / PWM)、暫定 UI (2D 波形表示 + 汎用パラメータ一覧 + 鍵盤)
+  内蔵テーブル (Basic Shapes / Sine / Harmonics / PWM)
 - Phase 2 (モジュレーション) 完了:
   - LFO×2: Sine / Triangle / Saw / Square / S&H、Hz 指定とテンポ同期 (8 小節〜1/32、3 連・付点)、
     リトリガー / フリーラン (フリーラン時は全ボイスが位相同期)、ユニポーラ切替
@@ -83,7 +83,21 @@ FX (ディレイのサンプル精度とフィードバック、EQ の利得、�
     アフタータッチ、キートラック、ノートごとのランダム)、デスティネーション 16 種
   - プリセット (上記)、ホストからのテンポ取得
 - Phase 3 (FX チェーン) 完了: マスター段に固定順 Distortion → EQ → Chorus → Delay → Reverb (下記)
-- 次: Phase 4 (3D 表示・本 UI)、Phase 5 (AI アシスタント)、Phase 6 (仕上げ)
+- Phase 4 (3D 表示・本 UI) 完了: OpenGL の 3D ウェーブテーブル表示、出力スコープ、タブ式 UI (下記)
+- 次: Phase 5 (AI アシスタント)、Phase 6 (仕上げ)
+
+## UI
+
+- **OSC** タブ: OSC A / B (テーブル選択、.wav 読込、3D 表示、ピッチ・レベル・ユニゾンのノブ)、Sub / Noise、
+  Filter、Env 1 / 2、Global
+- **MOD** タブ: LFO 1 / 2、モジュレーションマトリクス 8 スロット
+- **FX** タブ: 5 ユニットの全パラメータ
+- 下部: 出力スコープ (立ち上がりゼロクロスでトリガー) と鍵盤
+
+3D 表示 (`src/ui/Wavetable3DView`) はフレームごとに 1 本のポリライン (256 点) を奥行き方向に並べ、
+WT Position のフレームを白で強調する。頂点データはテーブルが変わったときだけ VBO に転送し、再描画は
+表示中のみ 30 fps のタイマーで要求する (連続描画はしない)。ドラッグで回転、ホイールでズーム、
+ダブルクリックで視点リセット。OpenGL が使えない環境では 2D の重ね描きにフォールバックする。
 
 ## FX チェーン
 
@@ -99,7 +113,6 @@ OFF のユニットは処理を完全にスキップする (全 OFF ならバッ
 | Delay | Tempo Sync / Time (ms) / Division (LFO と同じ 15 分割)、Feedback、Lowpass、Ping Pong、Mix | 自前の線形補間ディレイライン (最大 5 秒)、時間変更は 50 ms でグライド |
 | Reverb | Size、Damping、Width、Predelay (0〜250 ms)、Mix | `juce::Reverb` (Freeverb 系、軽量) + プリディレイ |
 
-画面中段の FX ストリップで各ユニットの ON/OFF と Mix を操作できる。細かいパラメータは下の一覧にある。
 Delay か Reverb が ON のときはホストにテール 6 秒を申告するので、バウンス時に余韻が切れない。
 
 ## 音のテスト時の注意
