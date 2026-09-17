@@ -155,6 +155,7 @@ private:
     void insertRequest (const juce::String& text);
     void showPresetsMenu();
     void showHistoryMenu();
+    void refreshModelBar();
     void saveInputAsPreset();
     void addMidiFile (const juce::File&);
     void refreshContextLabel();
@@ -171,6 +172,12 @@ private:
     InputEditor input;
     juce::TextButton presetsButton { "Presets" }, savePresetButton { "Save" }, sendButton { "Send" }, cancelButton { "Cancel" };
     juce::OwnedArray<juce::TextButton> quickButtons;
+
+    // Model / reasoning effort bar under the input box.
+    juce::ComboBox modelBox;
+    juce::Label effortLabel;
+    juce::OwnedArray<juce::TextButton> effortButtons;
+    static const char* effortIds (int i) { return i == 0 ? "low" : i == 1 ? "medium" : "high"; }
     std::unique_ptr<juce::FileChooser> chooser;
     bool dragOver = false;
     size_t lastHistorySize = 0;

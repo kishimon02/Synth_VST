@@ -26,6 +26,10 @@ public:
     const Settings& getSettings() const noexcept { return settings; }
     bool hasKey() const noexcept { return settings.hasKey(); }
 
+    // The model bar under the input: both are stored with the other settings.
+    void setModel (const juce::String&);
+    void setEffort (const juce::String&);
+
     bool isBusy() const noexcept { return busy.load(); }
     void send (const juce::String& userText);
     void cancel();

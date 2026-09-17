@@ -98,6 +98,29 @@ AiPage::AiPage (WaveForgeProcessor& p)
     for (auto* b : { &presetsButton, &savePresetButton, &sendButton, &cancelButton })
         addAndMakeVisible (b);
 
+    modelBox.setTooltip (jp("このあとの依頼に使うモデル"));
+    modelBox.onChange = [this] { assistant.setModel (modelBox.getText()); };
+    addAndMakeVisible (modelBox);
+
+    effortLabel.setText (jp("思考"), juce::dontSendNotification);
+    effortLabel.setFont (juce::FontOptions (11.5f));
+    effortLabel.setColour (juce::Label::textColourId, colours::textDim);
+    effortLabel.setJustificationType (juce::Justification::centredRight);
+    addAndMakeVisible (effortLabel);
+
+    const char* effortLabels[3] = { "Low", "Medium", "High" };
+    for (int i = 0; i < 3; ++i)
+    {
+        auto* b = effortButtons.add (new juce::TextButton (effortLabels[i]));
+        b->setClickingTogglesState (true);
+        b->setRadioGroupId (0x4e5f);
+        b->setConnectedEdges ((i > 0 ? juce::Button::ConnectedOnLeft : 0)
+                                  | (i < 2 ? juce::Button::ConnectedOnRight : 0));
+        b->setColour (juce::TextButton::buttonOnColourId, colours::accentFx.withAlpha (0.55f));
+        b->onClick = [this, i] { assistant.setEffort (effortIds (i)); };
+        addAndMakeVisible (b);
+    }
+
     struct Quick { const char* label; const char* category; };
     const Quick quicks[] = { { "メロディ", "メロディ" }, { "コード", "コード" }, { "ドラム", "ドラム" }, { "ベース", "ベース" },
                              { "続き", "展開" }, { "ハモリ", "ハモリ" }, { "Arp", "アルペジオ" },
@@ -167,10 +190,39 @@ void AiPage::refreshAll()
         chatViewport.setViewPosition (0, juce::jmax (0, chatList.getHeight() - chatViewport.getViewHeight()));
     }
 
+    refreshModelBar();
     sessionLabel.setText (history.empty() ? jp("新しい会話")
                                           : assistant.sessionStartTime().formatted ("%m/%d %H:%M") + jp(" の会話")
                                                 + (assistant.sessionFile() == juce::File() ? jp(" (未保存)") : juce::String()),
                           juce::dontSendNotification);
+}
+
+// Keeps the model / effort bar in step with the stored settings.
+void AiPage::refreshModelBar()
+{
+    const auto& settings = assistant.getSettings();
+    auto models = settings.isAnthropic() ? ai::Settings::anthropicModels()
+                                         : juce::StringArray { "gpt-5", "gpt-5-mini" };
+    if (settings.model.isNotEmpty() && ! models.contains (settings.model))
+        models.add (settings.model);
+
+    juce::StringArray shown;
+    for (int i = 0; i < modelBox.getNumItems(); ++i)
+        shown.add (modelBox.getItemText (i));
+    if (shown != models)
+    {
+        modelBox.clear (juce::dontSendNotification);
+        modelBox.addItemList (models, 1);
+    }
+    modelBox.setSelectedId (models.indexOf (settings.model) + 1, juce::dontSendNotification);
+    modelBox.setEnabled (! lastBusy);
+
+    for (int i = 0; i < effortButtons.size(); ++i)
+    {
+        effortButtons[i]->setToggleState (settings.effort == effortIds (i), juce::dontSendNotification);
+        effortButtons[i]->setEnabled (settings.isAnthropic() && ! lastBusy);
+    }
+    effortLabel.setEnabled (settings.isAnthropic());
 }
 
 void AiPage::setRequestText (const juce::String& text)
@@ -422,7 +474,7 @@ void AiPage::resized()
     hintLabel.setBounds (r.removeFromTop (16));
     r.removeFromTop (4);
 
-    auto bottom = r.removeFromBottom (108);
+    auto bottom = r.removeFromBottom (136);
     r.removeFromBottom (6);
     chatViewport.setBounds (r);
     chatList.layoutFor (chatViewport.getMaximumVisibleWidth());
@@ -431,6 +483,15 @@ void AiPage::resized()
     const int qw = quickRow.getWidth() / juce::jmax (1, quickButtons.size());
     for (auto* b : quickButtons)
         b->setBounds (quickRow.removeFromLeft (qw).reduced (2, 1));
+    bottom.removeFromBottom (4);
+
+    // model / effort bar, lined up under the input box
+    auto modelRow = bottom.removeFromBottom (24);
+    modelRow.removeFromLeft (92);
+    modelBox.setBounds (modelRow.removeFromLeft (188).reduced (2, 1));
+    effortLabel.setBounds (modelRow.removeFromLeft (46));
+    for (auto* b : effortButtons)
+        b->setBounds (modelRow.removeFromLeft (62).reduced (0, 1));
     bottom.removeFromBottom (4);
     auto inputRow = bottom;
     auto left = inputRow.removeFromLeft (92);

@@ -24,6 +24,27 @@ void Assistant::reloadSettings()
     if (onChanged) onChanged();
 }
 
+void Assistant::setModel (const juce::String& model)
+{
+    const auto trimmed = model.trim();
+    if (trimmed.isEmpty() || trimmed == settings.model)
+        return;
+    settings.model = trimmed;
+    juce::String error;
+    settings.save (error);
+    if (onChanged) onChanged();
+}
+
+void Assistant::setEffort (const juce::String& effort)
+{
+    if ((effort != "low" && effort != "medium" && effort != "high") || effort == settings.effort)
+        return;
+    settings.effort = effort;
+    juce::String error;
+    settings.save (error);
+    if (onChanged) onChanged();
+}
+
 void Assistant::clearConversation()
 {
     messages.clear();
