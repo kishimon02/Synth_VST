@@ -27,8 +27,9 @@ inline juce::String midiNoteName (int note)
 }
 
 // Background, grid, pitch labels and the notes. Returns the number of bars drawn.
+// `playBeat` >= 0 draws the playback position as a white line.
 inline int drawPianoRoll (juce::Graphics& g, juce::Rectangle<float> r, const std::vector<ai::Note>& notes,
-                          int beatsPerBar, bool drums, juce::Colour colour)
+                          int beatsPerBar, bool drums, juce::Colour colour, double playBeat = -1.0)
 {
     g.setColour (colours::widget);
     g.fillRoundedRectangle (r, 6.0f);
@@ -84,6 +85,14 @@ inline int drawPianoRoll (juce::Graphics& g, juce::Rectangle<float> r, const std
         const float y = plot.getBottom() - rowH * (float) (n.pitch - lo + 1);
         g.setColour (colour.withAlpha (0.45f + 0.55f * (float) n.velocity / 127.0f));
         g.fillRoundedRectangle (x, y + 1.0f, w, juce::jmax (2.0f, rowH - 2.0f), 2.0f);
+    }
+    if (playBeat >= 0.0 && playBeat <= (double) totalBeats)
+    {
+        const float x = plot.getX() + plot.getWidth() * (float) playBeat / totalBeats;
+        g.setColour (juce::Colours::white.withAlpha (0.25f));
+        g.fillRect (x - 1.5f, plot.getY(), 3.0f, plot.getHeight());
+        g.setColour (juce::Colours::white);
+        g.fillRect (x - 0.5f, plot.getY(), 1.0f, plot.getHeight());
     }
     g.setColour (colours::panelEdge);
     g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);

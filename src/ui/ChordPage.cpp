@@ -73,7 +73,7 @@ ChordPage::ChordPage (WaveForgeProcessor& p) : processor (p)
     applyButton.onClick = [this] { rebuild(); };
     savePresetButton.onClick = [this] { saveAsUserPreset(); };
     deleteButton.onClick = [this] { deleteSelectedUserPreset(); };
-    auditionButton.onClick = [this] { processor.getPreviewPlayer().start (notes, processor.getHostBpm()); };
+    auditionButton.onClick = [this] { startPreview (notes, 0.0); };
     stopButton.onClick = [this] { processor.getPreviewPlayer().stop(); };
     saveMidiButton.onClick = [this] { saveMidiFile(); };
     sendToAiButton.setButtonText (jp("AI に渡す"));
@@ -203,8 +203,40 @@ void ChordPage::auditionChord (int index)
 {
     if (! juce::isPositiveAndBelow (index, (int) chords.size()))
         return;
-    processor.getPreviewPlayer().start (ai::ChordLibrary::renderChord (chords[(size_t) index], options()),
-                                        processor.getHostBpm());
+
+    // A single chord is rendered from beat 0, so the playhead is offset to
+    // where that chord sits in the progression.
+    double offset = 0.0;
+    for (int i = 0; i < index; ++i)
+        offset += chords[(size_t) i].beats;
+
+    startPreview (ai::ChordLibrary::renderChord (chords[(size_t) index], options()), offset);
+}
+
+// Starts the audition and the 30 Hz repaint that moves the white position line.
+void ChordPage::startPreview (const std::vector<ai::Note>& toPlay, double offsetBeats)
+{
+    previewOffsetBeats = offsetBeats;
+    previewId = processor.getPreviewPlayer().start (toPlay, processor.getHostBpm());
+    startTimerHz (30);
+}
+
+double ChordPage::playheadBeat() const
+{
+    const auto& preview = processor.getPreviewPlayer();
+    if (previewId == 0 || ! preview.isPlaying() || preview.playingId() != previewId)
+        return -1.0;
+    return preview.playPositionBeats() + previewOffsetBeats;
+}
+
+void ChordPage::timerCallback()
+{
+    if (playheadBeat() < 0.0)
+    {
+        stopTimer();          // the line is gone: one last repaint clears it
+        previewId = 0;
+    }
+    repaint (rollArea);
 }
 
 //==============================================================================
@@ -349,7 +381,7 @@ void ChordPage::paint (juce::Graphics& g)
     g.setColour (colours::panelEdge);
     g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
 
-    drawPianoRoll (g, rollArea.toFloat(), notes, 4, false, colours::accentFx);
+    drawPianoRoll (g, rollArea.toFloat(), notes, 4, false, colours::accentFx, playheadBeat());
     if (notes.empty())
     {
         g.setColour (colours::textDim);

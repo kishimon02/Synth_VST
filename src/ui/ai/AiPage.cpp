@@ -718,7 +718,11 @@ void AiPage::MessageView::paint (juce::Graphics& g)
 //==============================================================================
 AiPage::NotesCard::NotesCard (AiPage& p, const ai::ChatMessage& m) : page (p), message (m), dragHandle (*this)
 {
-    auditionButton.onClick = [this] { page.processor.getPreviewPlayer().start (message.notes, page.processor.getHostBpm()); };
+    auditionButton.onClick = [this]
+    {
+        previewId = page.processor.getPreviewPlayer().start (message.notes, page.processor.getHostBpm());
+        startTimerHz (30);     // moves the white position line
+    };
     stopButton.onClick = [this] { page.processor.getPreviewPlayer().stop(); };
     saveButton.onClick = [this]
     {
@@ -780,11 +784,30 @@ void AiPage::NotesCard::resized()
     dragHandle.setBounds (buttons.removeFromRight (110).reduced (2, 1));
 }
 
+double AiPage::NotesCard::playheadBeat() const
+{
+    const auto& preview = page.processor.getPreviewPlayer();
+    if (previewId == 0 || ! preview.isPlaying() || preview.playingId() != previewId)
+        return -1.0;
+    return preview.playPositionBeats();
+}
+
+void AiPage::NotesCard::timerCallback()
+{
+    if (playheadBeat() < 0.0)
+    {
+        stopTimer();          // the line is gone: one last repaint clears it
+        previewId = 0;
+    }
+    repaint();
+}
+
 void AiPage::NotesCard::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().withTrimmedBottom (28.0f);
     const int bars = drawPianoRoll (g, r, message.notes, page.assistant.context().timeSigNumerator,
-                                    message.isDrums(), message.isDrums() ? colours::accentB : colours::accentFx);
+                                    message.isDrums(), message.isDrums() ? colours::accentB : colours::accentFx,
+                                    playheadBeat());
     g.setColour (colours::textDim);
     g.setFont (juce::FontOptions (11.0f));
     g.drawText (message.notesKind.toUpperCase() + "   " + juce::String (message.notes.size()) + " notes   "

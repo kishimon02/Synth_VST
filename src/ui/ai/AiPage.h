@@ -53,7 +53,8 @@ private:
     };
 
     // Piano-roll style preview of suggested notes + audition / drag / save.
-    class NotesCard final : public juce::Component
+    class NotesCard final : public juce::Component,
+                           private juce::Timer     // runs only while this card plays
     {
     public:
         NotesCard (AiPage&, const ai::ChatMessage&);
@@ -61,6 +62,8 @@ private:
         void resized() override;
         static int preferredHeight() { return 190; }
     private:
+        void timerCallback() override;
+        double playheadBeat() const;
         class DragHandle final : public juce::TextButton
         {
         public:
@@ -78,6 +81,7 @@ private:
         DragHandle dragHandle;
         juce::File exported;
         std::unique_ptr<juce::FileChooser> chooser;
+        int previewId = 0;                 // only the card that started playback draws the line
     };
 
     // Parameter diff (+ wavetable) with Apply / Undo.

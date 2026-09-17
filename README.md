@@ -131,7 +131,8 @@ build/vs2022/WaveForgeTests_artefacts/Release/WaveForgeTests.exe --soak 30
 - **コード進行**: 選ぶと度数 (ディグリー) が下の Degrees 欄に入り、ピアノロールと各コードのボタンが更新される。
   コードのボタンを押すとそのコードだけ試聴できる
 - **Oct / 繰り返し / Bass**: ボイシングの高さ、1x〜4x の繰り返し、ルートを 1 オクターブ下に足すかどうか
-- **Audition** で全体を試聴、**Drag to DAW** を Studio One のトラックへドロップ、**Save .mid...** でファイル保存
+- **Audition** で全体を試聴、**Drag to DAW** を Studio One のトラックへドロップ、**Save .mid...** でファイル保存。
+  試聴中は**再生位置が白い縦線**で動く (コードのボタンで 1 つだけ鳴らしたときも、そのコードの位置に出る)
 - **AI に渡す**: 「キー A minor、コード進行 Am - F - C - G (全 4 小節) に合うメロディを作って。」のような依頼文を
   AI タブの入力欄に入れる (送信はしないので、書き足してから Send)
 
@@ -207,8 +208,8 @@ Claude API (既定 `claude-opus-5`) または OpenAI 互換 API に、作りか�
   各カテゴリの代表的な依頼を入力欄に入れる。どちらも送信はしないので、書き足してから **Send** (Enter) で送る。
   送信中はチャット末尾に「AI の回答を待っています... N s」が出て、**Cancel** で中止できる。
   自分で書いた依頼は **Save** でユーザープリセットに登録できる (`%APPDATA%\WaveForge\RequestPresets.json`)
-- **フレーズの結果**: ピアノロール表示。**Audition** でこのシンセで試聴、**Drag to DAW** を Studio One のトラックへ
-  ドラッグすると `.mid` として置ける、**Save .mid...** で保存
+- **フレーズの結果**: ピアノロール表示。**Audition** でこのシンセで試聴 (再生位置が白い縦線で動く)、
+  **Drag to DAW** を Studio One のトラックへドラッグすると `.mid` として置ける、**Save .mid...** で保存
 - **音の結果**: 変更一覧 (現在値 → 新しい値)。**Apply** で反映、**Undo** で直前の状態に戻す。ウェーブテーブルが
   設計されていれば **Apply wavetable to OSC A** で `%APPDATA%\WaveForge\Wavetables\` に保存して読み込む
 - **アルペジオの結果**: **Apply pattern** で Custom パターンに設定、**Save as preset...** で JSON 保存

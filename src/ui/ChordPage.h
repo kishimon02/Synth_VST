@@ -12,7 +12,8 @@ namespace ui
 // Chord progression browser: pick a key, then a category, then a progression.
 // The result is shown as a piano roll that can be auditioned chord by chord,
 // dragged into the DAW as a .mid, or handed to the AI page as a request.
-class ChordPage final : public juce::Component
+class ChordPage final : public juce::Component,
+                       private juce::Timer     // runs only while the preview plays
 {
 public:
     explicit ChordPage (WaveForgeProcessor&);
@@ -37,6 +38,10 @@ private:
     };
 
     //==========================================================================
+    void timerCallback() override;
+    void startPreview (const std::vector<ai::Note>& toPlay, double offsetBeats);
+    double playheadBeat() const;
+
     void refreshCategories();
     void refreshProgressions (const juce::String& keepName = {});
     void applySelectedProgression();
@@ -62,6 +67,9 @@ private:
                      auditionButton { "Audition" }, stopButton { "Stop" }, saveMidiButton { "Save .mid..." },
                      sendToAiButton;
     DragHandle dragHandle { *this };
+
+    int previewId = 0;                 // which preview sequence this page started
+    double previewOffsetBeats = 0.0;   // where that sequence sits in the roll
 
     std::vector<ai::ChordProgression> visible;     // progressions of the current category and mode
     std::vector<ai::ChordSymbol> chords;
