@@ -28,6 +28,10 @@ struct OscParams
     float unisonDetune = 10.0f;// cents
     float unisonBlend = 0.75f; // 0..1
     float unisonWidth = 0.5f;  // 0..1
+
+    // Warp (OSC A only): OSC B's raw output modulates A. Voice::WarpMode.
+    int   warpMode = 0;
+    float warpAmount = 0.0f;   // 0..1
 };
 
 struct SubParams

@@ -10,6 +10,7 @@
 | `phase-2` | LFO x2、モジュレーションマトリクス、プリセット |
 | `phase-3` | FX チェーン (Distortion / EQ / Chorus / Delay / Reverb) |
 | `phase-4` | 3D ウェーブテーブル表示、本 UI |
+| `phase-4.5` | ウェーブテーブル・エディタ、2D / スペクトル表示、出力 3D スペクトログラム、OSC A Warp |
 | `phase-5` | AI アシスタント (Claude API 連携、MIDI 提案) |
 | `phase-6` | 仕上げ |
 

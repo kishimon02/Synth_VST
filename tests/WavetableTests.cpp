@@ -15,6 +15,7 @@
 #include "dsp/Envelope.h"
 #include "dsp/SynthEngine.h"
 #include "dsp/fx/FxChain.h"
+#include "dsp/WaveEditOps.h"
 
 #include <cmath>
 #include <iostream>
@@ -565,6 +566,139 @@ struct FxTest final : public juce::UnitTest
     }
 };
 
+struct WaveEditTest final : public juce::UnitTest
+{
+    WaveEditTest() : juce::UnitTest ("Wave editing", "DSP") {}
+
+    void runTest() override
+    {
+        namespace Ops = wf::WaveEditOps;
+        constexpr int N = wf::Wavetable::frameSize;
+
+        beginTest ("harmonic analysis and synthesis round-trip a band-limited frame");
+        {
+            std::vector<float> saw ((size_t) N);
+            for (int i = 0; i < N; ++i)
+                saw[(size_t) i] = bandlimitedSaw ((float) i / (float) N, 100);   // 100 harmonics < 256
+
+            Ops::Harmonics h;
+            Ops::analyse (saw.data(), h);
+            expectWithinAbsoluteError (h.magnitude[1], 1.0f, 1.0e-3f, "fundamental amplitude");
+            expectWithinAbsoluteError (h.magnitude[7], 1.0f / 7.0f, 1.0e-3f, "7th harmonic amplitude");
+            expectLessThan (h.magnitude[101], 1.0e-3f, "nothing above the 100th harmonic");
+
+            std::vector<float> back ((size_t) N);
+            Ops::synthesise (h, back.data());
+            float maxErr = 0.0f;
+            for (int i = 0; i < N; ++i)
+                maxErr = juce::jmax (maxErr, std::abs (back[(size_t) i] - saw[(size_t) i]));
+            logMessage ("round-trip maxErr=" + juce::String (maxErr, 6));
+            expectLessThan (maxErr, 1.0e-3f, "synthesis reproduces the analysed frame");
+        }
+
+        beginTest ("frame utilities behave");
+        {
+            std::vector<float> f ((size_t) N, 0.25f);
+            for (int i = 0; i < N; ++i) f[(size_t) i] += 0.5f * std::sin (juce::MathConstants<float>::twoPi * (float) i / (float) N);
+            Ops::removeDc (f.data());
+            double sum = 0.0; for (float v : f) sum += v;
+            expectLessThan (std::abs ((float) sum / (float) N), 1.0e-5f, "DC removed");
+            Ops::normalise (f.data());
+            expectWithinAbsoluteError (Ops::peak (f.data()), 1.0f, 1.0e-5f, "normalised to peak 1");
+
+            std::vector<float> table ((size_t) N * 3, 0.0f);
+            wf::WavetableLoader::basicShape ("Sine", table.data());
+            wf::WavetableLoader::basicShape ("Saw", table.data() + 2 * N);
+            Ops::morph (table.data(), 3, 0, 2);
+            const float mid = table[(size_t) N + 100];
+            expectWithinAbsoluteError (mid, 0.5f * (table[100] + table[(size_t) 2 * N + 100]), 1.0e-6f, "middle frame is the average");
+        }
+
+        beginTest ("a saved wavetable file loads back with the same frames");
+        {
+            std::vector<float> table ((size_t) N * 4);
+            wf::WavetableLoader::basicShape ("Sine", table.data());
+            wf::WavetableLoader::basicShape ("Triangle", table.data() + N);
+            wf::WavetableLoader::basicShape ("Square", table.data() + 2 * N);
+            wf::WavetableLoader::basicShape ("Pulse", table.data() + 3 * N);
+
+            auto file = juce::File::createTempFile (".wav");
+            juce::String error;
+            expect (wf::WavetableLoader::saveFile (table.data(), 4, file, error), error);
+
+            auto loaded = wf::WavetableLoader::loadFile (file, error);
+            expect (loaded != nullptr, error);
+            if (loaded != nullptr)
+            {
+                expectEquals (loaded->getNumFrames(), 4, "clm chunk gives 4 frames of 2048");
+                float maxErr = 0.0f;
+                for (int f = 0; f < 4; ++f)
+                    for (int i = 0; i < N; ++i)
+                        maxErr = juce::jmax (maxErr, std::abs (loaded->getRawFrame (f)[i] - table[(size_t) f * N + (size_t) i]));
+                expectLessThan (maxErr, 1.0e-6f, "32-bit float round trip is exact");
+            }
+            file.deleteFile();
+        }
+    }
+};
+
+struct WarpTest final : public juce::UnitTest
+{
+    WarpTest() : juce::UnitTest ("OSC warp", "DSP") {}
+
+    static float renderPeakDiff (int warpMode, float amount, float& peakOut)
+    {
+        auto tableA = wf::WavetableLoader::createBuiltin ("Sine");
+        auto tableB = wf::WavetableLoader::createBuiltin ("Sine");
+        wf::SynthParams p;
+        p.osc[0].table = tableA.get(); p.osc[0].randomPhase = false;
+        p.osc[1].table = tableB.get(); p.osc[1].enabled = false; p.osc[1].randomPhase = false;
+        p.osc[1].semitone = 7;
+        p.osc[0].warpMode = warpMode; p.osc[0].warpAmount = amount;
+        p.filter.enabled = false;
+        p.env[0] = { 1.0f, 100.0f, 1.0f, 50.0f };
+
+        wf::SynthEngine engine;
+        engine.prepare (48000.0);
+        juce::AudioBuffer<float> out (2, 4096);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, 1.0f), 0);
+        out.clear();
+        engine.process (out, midi, p);
+
+        // reference: same note, warp off
+        p.osc[0].warpMode = 0;
+        wf::SynthEngine ref;
+        ref.prepare (48000.0);
+        juce::AudioBuffer<float> refOut (2, 4096);
+        refOut.clear();
+        ref.process (refOut, midi, p);
+
+        float diff = 0.0f;
+        peakOut = 0.0f;
+        for (int i = 2048; i < 4096; ++i)
+        {
+            diff = juce::jmax (diff, std::abs (out.getSample (0, i) - refOut.getSample (0, i)));
+            peakOut = juce::jmax (peakOut, std::abs (out.getSample (0, i)));
+        }
+        return diff;
+    }
+
+    void runTest() override
+    {
+        beginTest ("FM / RM / AM from OSC B change OSC A's output, amount 0 does not");
+        float peak = 0.0f;
+        expectLessThan (renderPeakDiff (wf::Voice::warpFM, 0.0f, peak), 1.0e-6f, "FM at 0 is identical");
+        for (int mode : { (int) wf::Voice::warpFM, (int) wf::Voice::warpRM, (int) wf::Voice::warpAM })
+        {
+            const float d = renderPeakDiff (mode, 0.8f, peak);
+            logMessage ("mode " + juce::String (mode) + " diff=" + juce::String (d, 3) + " peak=" + juce::String (peak, 3));
+            expectGreaterThan (d, 0.05f, "warp audibly changes the signal");
+            expect (std::isfinite (peak) && peak < 2.0f, "bounded output");
+        }
+    }
+};
+
 // Minimal host for an APVTS, so presets can be tested without the plugin.
 struct DummyProcessor final : public juce::AudioProcessor
 {
@@ -692,6 +826,8 @@ static EngineRenderTest engineRenderTest;
 static LfoTest lfoTest;
 static ModMatrixTest modMatrixTest;
 static FxTest fxTest;
+static WaveEditTest waveEditTest;
+static WarpTest warpTest;
 static PresetTest presetTest;
 
 int main()

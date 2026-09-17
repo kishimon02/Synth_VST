@@ -17,18 +17,25 @@ public:
     void refresh();      // table list / selection changed
     void tick();         // 30 Hz: WT position -> 3D view
 
+    std::function<void (int osc)> onEdit;   // "Edit" pressed
+
 private:
     void chooseFile();
+    void setViewMode (Wavetable3DView::Mode);
 
     WaveForgeProcessor& processor;
     const int index;
     ParamToggle enabled;
     juce::ComboBox tableBox;
-    juce::TextButton loadButton { "Load .wav" };
+    juce::TextButton loadButton { "Load" }, editButton { "Edit" };
+    juce::TextButton mode3DButton { "3D" }, mode2DButton { "2D" }, modeSpecButton { "SP" };
+    std::vector<int> tableIndices;   // combo item -> bank index
     Wavetable3DView view;
     ParamKnob wtPos, octave, semi, fine, level, pan;
     ParamKnob unisonVoices, unisonDetune, unisonBlend, unisonWidth, phase;
     ParamToggle randomPhase;
+    std::unique_ptr<ParamCombo> warpMode;    // OSC A only
+    std::unique_ptr<ParamKnob>  warpAmount;
     std::unique_ptr<juce::FileChooser> chooser;
 };
 

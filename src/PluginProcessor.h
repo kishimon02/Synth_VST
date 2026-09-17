@@ -53,7 +53,11 @@ public:
     int  getOscTableIndex (int osc) const noexcept { return oscTableIndex[osc]; }
     const wf::Wavetable* getOscTable (int osc) const noexcept { return oscTable[osc].load (std::memory_order_relaxed); }
     void setOscTable (int osc, int bankIndex);
-    bool loadWavetableFile (int osc, const juce::File& file, juce::String& error);
+    bool loadWavetableFile (int osc, const juce::File& file, juce::String& error, bool forceReload = false);
+    double getCurrentSampleRate() const noexcept { return currentSampleRate; }
+
+    // Where the wavetable editor saves user tables.
+    static juce::File userWavetableDirectory();
 
     int getActiveVoiceCount() const noexcept { return activeVoices.load (std::memory_order_relaxed); }
     float getHostBpm() const noexcept { return hostBpm.load (std::memory_order_relaxed); }

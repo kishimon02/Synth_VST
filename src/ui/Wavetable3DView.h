@@ -1,68 +1,50 @@
 #pragma once
 
-#include <juce_opengl/juce_opengl.h>
+#include "LineStack3DView.h"
 #include "../dsp/Wavetable.h"
-#include "LookAndFeel.h"
+#include "../dsp/WaveEditOps.h"
 
 namespace ui
 {
 
-// Serum-style 3D wavetable view: every frame is one polyline, stacked along
-// the depth axis, the frame under the WT position highlighted.
-//
-// Cost: vertex data is uploaded once per table change (frames x 256 points);
-// each redraw only sets a few uniforms and issues one line-strip draw per
-// frame. Redraw is triggered from a 30 fps timer while the view is showing,
-// never continuously. If the GL context cannot be created, paint() draws a
-// 2D stacked fallback instead.
-class Wavetable3DView final : public juce::Component,
-                              private juce::OpenGLRenderer,
-                              private juce::Timer
+// Serum-style wavetable view. Three modes:
+//   3D       every frame as a polyline stacked in depth (OpenGL)
+//   2D       the frame under the WT position, interpolated, full width
+//   Spectrum harmonic magnitudes of that frame as bars
+class Wavetable3DView final : public LineStack3DView
 {
 public:
+    enum Mode { mode3D = 0, mode2D, modeSpectrum };
+
     explicit Wavetable3DView (juce::Colour accent = colours::accent);
-    ~Wavetable3DView() override;
 
     // Message thread. The table must outlive the view (bank is append-only).
     void setTable (const wf::Wavetable* table);
     void setPosition (float pos01);
+    void setMode (Mode m);
+    Mode getMode() const noexcept { return mode; }
 
-    void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override;
-    void mouseDrag (const juce::MouseEvent&) override;
-    void mouseDoubleClick (const juce::MouseEvent&) override;
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
-
-    static constexpr int pointsPerFrame = 256;
+    static constexpr int pointsPerFrame = 512;
 
 private:
-    void newOpenGLContextCreated() override;
-    void renderOpenGL() override;
-    void openGLContextClosing() override;
-    void timerCallback() override;
+    bool buildVertices (std::vector<float>& verts, int& numLines, int& pointsPerLine) override;
+    void paintFallback (juce::Graphics&) override;
+    void paintOverlay (juce::Graphics&) override;
+    void timerTick() override;
 
-    void uploadTable (const wf::Wavetable* table);
-    void paintFallback (juce::Graphics&);
-
-    juce::OpenGLContext context;
-    std::unique_ptr<juce::OpenGLShaderProgram> shader;
-    std::unique_ptr<juce::OpenGLShaderProgram::Uniform> projectionUniform, viewUniform, colourUniform;
-    std::unique_ptr<juce::OpenGLShaderProgram::Attribute> positionAttribute;
-    GLuint vbo = 0, vao = 0;
-    int uploadedFrames = 0;
+    void currentFrameSamples (std::vector<float>& out) const;   // interpolated frame at `position`
+    void refreshSpectrumIfNeeded();
 
     std::atomic<const wf::Wavetable*> pendingTable { nullptr };
-    const wf::Wavetable* uploadedTable = nullptr;
-    const wf::Wavetable* displayedTable = nullptr;   // message thread copy for the label / fallback
-
+    const wf::Wavetable* displayedTable = nullptr;
     std::atomic<float> position { 0.0f };
-    std::atomic<float> rotX { 0.55f }, rotY { -0.55f }, zoom { 1.0f };
-    std::atomic<bool> glReady { false };
-    juce::Point<float> dragStart;
-    float dragRotX = 0.0f, dragRotY = 0.0f;
-    juce::Colour accent;
+    Mode mode = mode3D;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Wavetable3DView)
+    // spectrum cache (message thread)
+    wf::WaveEditOps::Harmonics spectrum;
+    const wf::Wavetable* spectrumTable = nullptr;
+    float spectrumPosition = -1.0f;
+    float lastPaintedPosition = -1.0f;
 };
 
 } // namespace ui

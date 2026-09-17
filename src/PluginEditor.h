@@ -7,6 +7,8 @@
 #include "ui/LookAndFeel.h"
 #include "ui/Panels.h"
 #include "ui/Scope.h"
+#include "ui/ScopePage.h"
+#include "ui/WavetableEditor.h"
 
 // Main editor: header (title, preset bar), three tabbed pages (OSC / MOD /
 // FX), and a footer with the output scope and the on-screen keyboard.
@@ -27,6 +29,8 @@ private:
     void refreshPresetMenu();
     void savePresetAs();
     void loadPresetFile();
+    void openWaveEditor (int osc);
+    void closeWaveEditor();
 
     // Pages hosted by the tabbed component.
     struct OscPage final : public juce::Component
@@ -61,6 +65,11 @@ private:
     OscPage oscPage;
     ModPage modPage;
     ui::FxPage fxPage;
+    ui::ScopePage scopePage;
+
+    // The wavetable editor replaces the tabs while open (the OSC page's GL
+    // views live in native child windows, so nothing can be drawn over them).
+    std::unique_ptr<ui::WavetableEditor> waveEditor;
 
     ui::Scope scope;
     juce::MidiKeyboardComponent keyboard;

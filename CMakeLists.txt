@@ -74,7 +74,9 @@ target_sources(WaveForge PRIVATE
     src/Params.cpp
     src/PresetManager.cpp
     src/ui/Panels.cpp
+    src/ui/LineStack3DView.cpp
     src/ui/Wavetable3DView.cpp
+    src/ui/WavetableEditor.cpp
     ${WAVEFORGE_DSP_SOURCES}
 )
 

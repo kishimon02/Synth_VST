@@ -1,50 +1,9 @@
 #include "Wavetable3DView.h"
 
-using namespace juce::gl;
-
 namespace ui
 {
 
-namespace
-{
-    const char* vertexShaderSource = R"(
-        attribute vec3 position;
-        uniform mat4 projectionMatrix;
-        uniform mat4 viewMatrix;
-        varying float depthFade;
-        void main()
-        {
-            vec4 v = viewMatrix * vec4 (position, 1.0);
-            depthFade = clamp ((v.z + 7.5) / 4.5, 0.15, 1.0);
-            gl_Position = projectionMatrix * v;
-        }
-    )";
-
-    const char* fragmentShaderSource = R"(
-        uniform vec4 colour;
-        varying float depthFade;
-        void main()
-        {
-            gl_FragColor = vec4 (colour.rgb, colour.a * depthFade);
-        }
-    )";
-}
-
-Wavetable3DView::Wavetable3DView (juce::Colour accentIn) : accent (accentIn)
-{
-    setOpaque (true);
-    context.setRenderer (this);
-    context.setComponentPaintingEnabled (true);   // paint() is drawn over the GL frame
-    context.setContinuousRepainting (false);
-    context.attachTo (*this);
-    startTimerHz (30);
-}
-
-Wavetable3DView::~Wavetable3DView()
-{
-    stopTimer();
-    context.detach();
-}
+Wavetable3DView::Wavetable3DView (juce::Colour accentIn) : LineStack3DView (accentIn) {}
 
 void Wavetable3DView::setTable (const wf::Wavetable* table)
 {
@@ -52,80 +11,50 @@ void Wavetable3DView::setTable (const wf::Wavetable* table)
         return;
     displayedTable = table;
     pendingTable.store (table, std::memory_order_release);
+    requestVertexRefill();
     repaint();
 }
 
 void Wavetable3DView::setPosition (float pos01)
 {
     position.store (pos01, std::memory_order_relaxed);
+    if (displayedTable != nullptr)
+        setHighlightLine (juce::roundToInt (pos01 * (float) (displayedTable->getNumFrames() - 1)));
 }
 
-//==============================================================================
-void Wavetable3DView::timerCallback()
+void Wavetable3DView::setMode (Mode m)
 {
-    if (! isShowing())
-        return;
-    if (glReady.load())
-        context.triggerRepaint();
-    else
+    mode = m;
+    setGLRenderingEnabled (m == mode3D);
+    repaint();
+}
+
+void Wavetable3DView::timerTick()
+{
+    // 2D / spectrum modes are painted with juce: repaint only when the
+    // position moved so an idle view costs nothing.
+    if (mode != mode3D && std::abs (position.load() - lastPaintedPosition) > 1.0e-4f)
         repaint();
 }
 
-void Wavetable3DView::newOpenGLContextCreated()
+//==============================================================================
+bool Wavetable3DView::buildVertices (std::vector<float>& verts, int& numLines, int& pointsPerLine)
 {
-    shader = std::make_unique<juce::OpenGLShaderProgram> (context);
-    const bool ok = shader->addVertexShader (juce::OpenGLHelpers::translateVertexShaderToV3 (vertexShaderSource))
-                 && shader->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (fragmentShaderSource))
-                 && shader->link();
-    if (! ok)
-    {
-        DBG ("Wavetable3DView shader: " << shader->getLastError());
-        shader.reset();
-        return;
-    }
+    const auto* table = pendingTable.load (std::memory_order_acquire);
+    if (table == nullptr)
+        return false;
 
-    projectionUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*shader, "projectionMatrix");
-    viewUniform       = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*shader, "viewMatrix");
-    colourUniform     = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*shader, "colour");
-    positionAttribute = std::make_unique<juce::OpenGLShaderProgram::Attribute> (*shader, "position");
-
-    if (glGenVertexArrays != nullptr)
-    {
-        glGenVertexArrays (1, &vao);
-        glBindVertexArray (vao);
-    }
-    glGenBuffers (1, &vbo);
-    uploadedTable = nullptr;
-    uploadedFrames = 0;
-    glReady.store (true);
-}
-
-void Wavetable3DView::openGLContextClosing()
-{
-    glReady.store (false);
-    positionAttribute.reset();
-    projectionUniform.reset(); viewUniform.reset(); colourUniform.reset();
-    shader.reset();
-    if (vbo != 0) { glDeleteBuffers (1, &vbo); vbo = 0; }
-    if (vao != 0 && glDeleteVertexArrays != nullptr) { glDeleteVertexArrays (1, &vao); vao = 0; }
-    uploadedTable = nullptr;
-}
-
-void Wavetable3DView::uploadTable (const wf::Wavetable* table)
-{
-    uploadedTable = table;
-    uploadedFrames = table != nullptr ? table->getNumFrames() : 0;
-    if (uploadedFrames == 0)
-        return;
+    numLines = table->getNumFrames();
+    pointsPerLine = pointsPerFrame;
+    verts.resize ((size_t) numLines * pointsPerFrame * 3);
 
     // x: sample position, y: amplitude, z: frame depth (front = frame 0)
-    std::vector<float> verts ((size_t) uploadedFrames * pointsPerFrame * 3);
     const int step = wf::Wavetable::frameSize / pointsPerFrame;
     size_t k = 0;
-    for (int f = 0; f < uploadedFrames; ++f)
+    for (int f = 0; f < numLines; ++f)
     {
         const float* raw = table->getRawFrame (f);
-        const float z = uploadedFrames > 1 ? -1.0f + 2.0f * (float) f / (float) (uploadedFrames - 1) : 0.0f;
+        const float z = numLines > 1 ? -1.0f + 2.0f * (float) f / (float) (numLines - 1) : 0.0f;
         for (int i = 0; i < pointsPerFrame; ++i)
         {
             verts[k++] = -1.0f + 2.0f * (float) i / (float) (pointsPerFrame - 1);
@@ -133,153 +62,101 @@ void Wavetable3DView::uploadTable (const wf::Wavetable* table)
             verts[k++] = z;
         }
     }
-    glBindBuffer (GL_ARRAY_BUFFER, vbo);
-    glBufferData (GL_ARRAY_BUFFER, (GLsizeiptr) (verts.size() * sizeof (float)), verts.data(), GL_STATIC_DRAW);
+    return true;
 }
 
-void Wavetable3DView::renderOpenGL()
+void Wavetable3DView::currentFrameSamples (std::vector<float>& out) const
 {
-    const float scale = (float) context.getRenderingScale();
-    const int w = juce::roundToInt (scale * (float) getWidth());
-    const int h = juce::roundToInt (scale * (float) getHeight());
-    juce::OpenGLHelpers::clear (colours::widget);
-    if (shader == nullptr || w <= 0 || h <= 0)
+    constexpr int N = wf::Wavetable::frameSize;
+    out.assign ((size_t) N, 0.0f);
+    if (displayedTable == nullptr)
         return;
+    const int frames = displayedTable->getNumFrames();
+    const float p = position.load() * (float) juce::jmax (0, frames - 1);
+    const int f0 = juce::jlimit (0, frames - 1, (int) p);
+    const int f1 = juce::jmin (f0 + 1, frames - 1);
+    const float mix = p - (float) f0;
+    const float* a = displayedTable->getRawFrame (f0);
+    const float* b = displayedTable->getRawFrame (f1);
+    for (int i = 0; i < N; ++i)
+        out[(size_t) i] = a[i] + (b[i] - a[i]) * mix;
+}
 
-    const auto* table = pendingTable.load (std::memory_order_acquire);
-    if (table != uploadedTable)
-        uploadTable (table);
-    if (uploadedFrames == 0)
-        return;
-
-    glViewport (0, 0, w, h);
-    glEnable (GL_BLEND);
-    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable (GL_DEPTH_TEST);
-
-    shader->use();
-
-    const float aspect = (float) w / (float) h;
-    const float near = 2.0f, fh = 0.9f;
-    const auto projection = juce::Matrix3D<float>::fromFrustum (-fh * aspect, fh * aspect, -fh, fh, near, 40.0f);
-    const float dist = 3.4f / juce::jlimit (0.4f, 3.0f, zoom.load());
-    // column-major: (T * R) v rotates first, then pushes the scene away from the camera
-    const auto view = juce::Matrix3D<float>::fromTranslation ({ 0.0f, 0.0f, -dist })
-                    * juce::Matrix3D<float>::rotation ({ rotX.load(), rotY.load(), 0.0f });
-    projectionUniform->setMatrix4 (projection.mat, 1, false);
-    viewUniform->setMatrix4 (view.mat, 1, false);
-
-    if (vao != 0) glBindVertexArray (vao);
-    glBindBuffer (GL_ARRAY_BUFFER, vbo);
-    glVertexAttribPointer ((GLuint) positionAttribute->attributeID, 3, GL_FLOAT, GL_FALSE, 3 * sizeof (float), nullptr);
-    glEnableVertexAttribArray ((GLuint) positionAttribute->attributeID);
-
+void Wavetable3DView::refreshSpectrumIfNeeded()
+{
     const float pos = position.load();
-    const int highlight = juce::roundToInt (pos * (float) (uploadedFrames - 1));
-    const auto dim = accent.withAlpha (uploadedFrames > 64 ? 0.35f : 0.6f);
-
-    glLineWidth (1.0f);
-    for (int f = uploadedFrames - 1; f >= 0; --f)   // back to front
-    {
-        if (f == highlight)
-            continue;
-        const float t = uploadedFrames > 1 ? (float) f / (float) (uploadedFrames - 1) : 0.0f;
-        const auto c = dim.interpolatedWith (juce::Colours::white.withAlpha (dim.getAlpha()), t * 0.25f);
-        colourUniform->set (c.getFloatRed(), c.getFloatGreen(), c.getFloatBlue(), c.getFloatAlpha());
-        glDrawArrays (GL_LINE_STRIP, f * pointsPerFrame, pointsPerFrame);
-    }
-
-    glLineWidth (2.5f);
-    colourUniform->set (1.0f, 1.0f, 1.0f, 1.0f);
-    glDrawArrays (GL_LINE_STRIP, highlight * pointsPerFrame, pointsPerFrame);
-    glLineWidth (1.0f);
-
-    glDisableVertexAttribArray ((GLuint) positionAttribute->attributeID);
-    glBindBuffer (GL_ARRAY_BUFFER, 0);
+    if (displayedTable == spectrumTable && std::abs (pos - spectrumPosition) < 1.0e-4f)
+        return;
+    spectrumTable = displayedTable;
+    spectrumPosition = pos;
+    std::vector<float> frame;
+    currentFrameSamples (frame);
+    wf::WaveEditOps::analyse (frame.data(), spectrum);
 }
 
 //==============================================================================
-void Wavetable3DView::paint (juce::Graphics& g)
-{
-    if (! glReady.load())
-        paintFallback (g);
-
-    if (displayedTable != nullptr)
-    {
-        const int frames = displayedTable->getNumFrames();
-        const int current = juce::roundToInt (position.load() * (float) (frames - 1)) + 1;
-        g.setColour (colours::text.withAlpha (0.75f));
-        g.setFont (juce::FontOptions (11.5f));
-        g.drawText (displayedTable->getName() + "   " + juce::String (current) + " / " + juce::String (frames),
-                    getLocalBounds().reduced (8, 5), juce::Justification::topLeft);
-    }
-    g.setColour (colours::panelEdge);
-    g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 6.0f, 1.0f);
-}
-
 void Wavetable3DView::paintFallback (juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat();
-    g.fillAll (colours::widget);
+    auto r = getLocalBounds().toFloat().reduced (6.0f, 18.0f);
+    lastPaintedPosition = position.load();
     if (displayedTable == nullptr)
         return;
 
-    // Stacked 2D frames, offset diagonally, current one on top in white.
-    const int frames = displayedTable->getNumFrames();
-    const int shown = juce::jmin (frames, 24);
-    const int highlight = juce::roundToInt (position.load() * (float) (frames - 1));
-    const float dx = r.getWidth() * 0.25f / (float) juce::jmax (1, shown);
-    const float dy = r.getHeight() * 0.5f / (float) juce::jmax (1, shown);
-    const float lineW = r.getWidth() * 0.7f, amp = r.getHeight() * 0.18f;
-
-    auto drawFrame = [&] (int f, juce::Colour c, float thickness)
+    if (mode == modeSpectrum)
     {
-        const int slot = frames > 1 ? (int) ((long long) f * (shown - 1) / (frames - 1)) : 0;
-        const float x0 = r.getX() + 10.0f + dx * (float) slot;
-        const float y0 = r.getBottom() - 16.0f - dy * (float) slot;
-        const float* raw = displayedTable->getRawFrame (f);
-        juce::Path p;
-        for (int i = 0; i < pointsPerFrame; ++i)
+        refreshSpectrumIfNeeded();
+        constexpr int shown = 64;
+        const float bw = r.getWidth() / (float) shown;
+        g.setColour (colours::panelEdge);
+        g.drawHorizontalLine ((int) r.getBottom(), r.getX(), r.getRight());
+        for (int k = 1; k <= shown; ++k)
         {
-            const float x = x0 + lineW * (float) i / (float) (pointsPerFrame - 1);
-            const float y = y0 - raw[i * (wf::Wavetable::frameSize / pointsPerFrame)] * amp;
-            if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+            const float m = juce::jlimit (0.0f, 1.0f, spectrum.magnitude[(size_t) k]);
+            const float hgt = m * r.getHeight();
+            g.setColour (accent.withAlpha (0.35f + 0.65f * m));
+            g.fillRect (r.getX() + bw * (float) (k - 1) + 1.0f, r.getBottom() - hgt, bw - 2.0f, hgt);
         }
-        g.setColour (c);
-        g.strokePath (p, juce::PathStrokeType (thickness));
-    };
-
-    for (int s = shown - 1; s >= 0; --s)
-    {
-        const int f = frames > 1 ? (int) ((long long) s * (frames - 1) / juce::jmax (1, shown - 1)) : 0;
-        drawFrame (f, accent.withAlpha (0.35f), 1.0f);
+        g.setColour (colours::textDim);
+        g.setFont (juce::FontOptions (10.0f));
+        for (int k = 8; k <= shown; k += 8)
+            g.drawText (juce::String (k), (int) (r.getX() + bw * (float) (k - 1) - 10.0f), (int) r.getBottom() + 2, 22, 12,
+                        juce::Justification::centred);
+        return;
     }
-    drawFrame (highlight, juce::Colours::white, 2.0f);
+
+    // 2D: the interpolated current frame, full width
+    std::vector<float> frame;
+    currentFrameSamples (frame);
+    g.setColour (colours::panelEdge);
+    g.drawHorizontalLine ((int) r.getCentreY(), r.getX(), r.getRight());
+    for (int q = 1; q < 4; ++q)
+        g.drawVerticalLine ((int) (r.getX() + r.getWidth() * (float) q / 4.0f), r.getY(), r.getBottom());
+
+    juce::Path p;
+    const int N = wf::Wavetable::frameSize;
+    const int step = juce::jmax (1, N / juce::jmax (64, (int) r.getWidth() * 2));
+    for (int i = 0; i < N; i += step)
+    {
+        const float x = r.getX() + r.getWidth() * (float) i / (float) N;
+        const float y = r.getCentreY() - juce::jlimit (-1.0f, 1.0f, frame[(size_t) i]) * r.getHeight() * 0.48f;
+        if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+    }
+    p.lineTo (r.getRight(), r.getCentreY() - juce::jlimit (-1.0f, 1.0f, frame[0]) * r.getHeight() * 0.48f);
+    g.setColour (accent);
+    g.strokePath (p, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
-//==============================================================================
-void Wavetable3DView::mouseDown (const juce::MouseEvent& e)
+void Wavetable3DView::paintOverlay (juce::Graphics& g)
 {
-    dragStart = e.position;
-    dragRotX = rotX.load();
-    dragRotY = rotY.load();
-}
-
-void Wavetable3DView::mouseDrag (const juce::MouseEvent& e)
-{
-    const auto d = e.position - dragStart;
-    rotX.store (juce::jlimit (-1.4f, 1.4f, dragRotX + d.y * 0.01f));
-    rotY.store (dragRotY + d.x * 0.01f);
-}
-
-void Wavetable3DView::mouseDoubleClick (const juce::MouseEvent&)
-{
-    rotX.store (0.55f); rotY.store (-0.55f); zoom.store (1.0f);
-}
-
-void Wavetable3DView::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
-{
-    zoom.store (juce::jlimit (0.4f, 3.0f, zoom.load() * (1.0f + wheel.deltaY * 0.5f)));
+    if (displayedTable == nullptr)
+        return;
+    const int frames = displayedTable->getNumFrames();
+    const int current = juce::roundToInt (position.load() * (float) (frames - 1)) + 1;
+    g.setColour (colours::text.withAlpha (0.75f));
+    g.setFont (juce::FontOptions (11.5f));
+    g.drawText (displayedTable->getName() + "   " + juce::String (current) + " / " + juce::String (frames)
+                    + (mode == modeSpectrum ? "   harmonics" : ""),
+                getLocalBounds().reduced (8, 5), juce::Justification::topLeft);
 }
 
 } // namespace ui

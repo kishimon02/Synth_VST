@@ -39,6 +39,7 @@ namespace ModDest
         subLevel, noiseLevel,
         filterCutoff, filterResonance, filterDrive,
         ampLevel,
+        oscAWarp,            // appended after Phase 2 so saved slot indices stay valid
         count
     };
 
@@ -52,7 +53,8 @@ namespace ModDest
                  "OSC A Detune", "OSC B Detune",
                  "Sub Level", "Noise Level",
                  "Filter Cutoff", "Filter Reso", "Filter Drive",
-                 "Amp Level" };
+                 "Amp Level",
+                 "OSC A Warp" };
     }
 
     // What an amount of 1.0 adds, in the destination's own unit.

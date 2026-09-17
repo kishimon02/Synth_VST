@@ -22,6 +22,10 @@ class Voice
 public:
     static constexpr int controlInterval = 32;
 
+    // OSC A warp: how OSC B's (raw, pre-level) output modulates OSC A.
+    enum WarpMode { warpOff = 0, warpFM, warpRM, warpAM, numWarpModes };
+    static juce::StringArray warpModeNames() { return { "Off", "FM from B", "Ring Mod B", "AM from B" }; }
+
     void prepare (double sampleRate);
 
     // Starts a note. If the voice is still sounding it fades out over ~3 ms
@@ -73,6 +77,8 @@ private:
     float gainA = 0.0f, gainB = 0.0f, gainSub = 0.0f, gainNoise = 0.0f;
     float panAL = 1.0f, panAR = 1.0f, panBL = 1.0f, panBR = 1.0f;
     bool  routeA = true, routeB = true, routeSub = true, routeNoise = true, filterOn = true;
+    int   warpMode = warpOff;
+    float warpAmount = 0.0f;
     int   controlCounter = 0;
 };
 

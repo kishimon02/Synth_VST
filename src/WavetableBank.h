@@ -26,9 +26,11 @@ public:
     juce::String nameAt (int index) const     { auto* t = get (index); return t != nullptr ? t->getName() : juce::String(); }
     juce::String sourceIdAt (int index) const { auto* t = get (index); return t != nullptr ? t->getSourceId() : juce::String(); }
 
+    // Latest match wins, so a re-saved user table shadows its older copy
+    // (the old one stays alive for any voice still reading it).
     int indexOfSourceId (const juce::String& id) const noexcept
     {
-        for (int i = 0; i < size(); ++i)
+        for (int i = size() - 1; i >= 0; --i)
             if (tables[(size_t) i]->getSourceId() == id)
                 return i;
         return -1;
@@ -52,6 +54,29 @@ public:
     int addFile (const juce::File& file, juce::String& error)
     {
         return resolve (file.getFullPathName(), error);
+    }
+
+    // Loads the file again even if a table with that path is already cached
+    // (used after the editor overwrites a user table).
+    int reloadFile (const juce::File& file, juce::String& error)
+    {
+        if (auto t = wf::WavetableLoader::loadFile (file, error))
+        {
+            tables.push_back (std::move (t));
+            return size() - 1;
+        }
+        return -1;
+    }
+
+    // Names shown in the table menu: user tables appear with their file name.
+    std::vector<int> visibleIndices() const
+    {
+        // Hide shadowed duplicates (same sourceId, older copy).
+        std::vector<int> out;
+        for (int i = 0; i < size(); ++i)
+            if (indexOfSourceId (tables[(size_t) i]->getSourceId()) == i)
+                out.push_back (i);
+        return out;
     }
 
 private:

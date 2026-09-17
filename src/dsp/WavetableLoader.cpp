@@ -230,6 +230,62 @@ std::shared_ptr<Wavetable> WavetableLoader::loadFile (const juce::File& file, ju
     return std::make_shared<Wavetable> (file.getFileNameWithoutExtension(), file.getFullPathName(), std::move (frames));
 }
 
+bool WavetableLoader::basicShape (const juce::String& name, float* out)
+{
+    if (name == "Sine")          synthesizeFrame (sineHarmonics(), out);
+    else if (name == "Triangle") synthesizeFrame (triangleHarmonics(), out);
+    else if (name == "Saw")      synthesizeFrame (sawHarmonics(), out);
+    else if (name == "Square")   synthesizeFrame (squareHarmonics(), out);
+    else if (name == "Pulse")    synthesizeFrame (pulseHarmonics (0.25f), out);
+    else return false;
+    return true;
+}
+
+bool WavetableLoader::saveFile (const float* frames, int numFrames, const juce::File& file, juce::String& error)
+{
+    if (frames == nullptr || numFrames < 1)
+    {
+        error = "Nothing to save.";
+        return false;
+    }
+
+    // RIFF / fmt (IEEE float mono) / clm / data, written by hand so the
+    // "clm " chunk lands where Serum expects it.
+    juce::MemoryOutputStream out;
+    const juce::String clm = "<!>2048 01000000 wavetable (WaveForge)";
+    const juce::uint32 clmSize = (juce::uint32) clm.getNumBytesAsUTF8();
+    const juce::uint32 clmPadded = clmSize + (clmSize & 1);
+    const juce::uint32 dataSize = (juce::uint32) numFrames * (juce::uint32) N * 4u;
+    const juce::uint32 riffSize = 4 + (8 + 16) + (8 + clmPadded) + (8 + dataSize);
+
+    out.write ("RIFF", 4); out.writeInt ((int) riffSize); out.write ("WAVE", 4);
+    out.write ("fmt ", 4); out.writeInt (16);
+    out.writeShort (3);                 // WAVE_FORMAT_IEEE_FLOAT
+    out.writeShort (1);                 // mono
+    out.writeInt (44100);               // nominal sample rate
+    out.writeInt (44100 * 4);           // byte rate
+    out.writeShort (4);                 // block align
+    out.writeShort (32);                // bits per sample
+    out.write ("clm ", 4); out.writeInt ((int) clmSize);
+    out.write (clm.toRawUTF8(), clmSize);
+    if (clmSize & 1) out.writeByte (0);
+    out.write ("data", 4); out.writeInt ((int) dataSize);
+    for (size_t i = 0; i < (size_t) numFrames * (size_t) N; ++i)
+        out.writeFloat (frames[i]);
+
+    if (! file.getParentDirectory().createDirectory())
+    {
+        error = "Could not create " + file.getParentDirectory().getFullPathName();
+        return false;
+    }
+    if (! file.replaceWithData (out.getData(), out.getDataSize()))
+    {
+        error = "Could not write " + file.getFullPathName();
+        return false;
+    }
+    return true;
+}
+
 std::shared_ptr<Wavetable> WavetableLoader::fromSourceId (const juce::String& sourceId, juce::String& error)
 {
     if (sourceId.startsWith ("builtin:"))

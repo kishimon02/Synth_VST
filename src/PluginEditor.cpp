@@ -62,6 +62,7 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     : AudioProcessorEditor (p),
       processor (p),
       oscPage (p), modPage (p.getAPVTS()), fxPage (p.getAPVTS()),
+      scopePage (p.getScopeBuffer(), [&p] { return p.getCurrentSampleRate(); }),
       scope (p.getScopeBuffer()),
       keyboard (p.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard)
 {
@@ -98,9 +99,13 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     tabs.addTab ("OSC", ui::colours::background, &oscPage, false);
     tabs.addTab ("MOD", ui::colours::background, &modPage, false);
     tabs.addTab ("FX",  ui::colours::background, &fxPage,  false);
+    tabs.addTab ("SCOPE", ui::colours::background, &scopePage, false);
     tabs.setTabBarDepth (30);
     tabs.setOutline (0);
     addAndMakeVisible (tabs);
+
+    oscPage.oscA.onEdit = [this] (int osc) { openWaveEditor (osc); };
+    oscPage.oscB.onEdit = [this] (int osc) { openWaveEditor (osc); };
 
     addAndMakeVisible (scope);
 
@@ -205,6 +210,27 @@ void WaveForgeEditor::loadPresetFile()
                               });
 }
 
+void WaveForgeEditor::openWaveEditor (int osc)
+{
+    waveEditor = std::make_unique<ui::WavetableEditor> (processor, osc);
+    waveEditor->onClose = [this] { closeWaveEditor(); };
+    addAndMakeVisible (*waveEditor);
+    tabs.setVisible (false);
+    resized();
+}
+
+void WaveForgeEditor::closeWaveEditor()
+{
+    // Deferred: the close button that called us lives inside the editor.
+    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<WaveForgeEditor> (this)]
+    {
+        if (safe == nullptr) return;
+        safe->waveEditor.reset();
+        safe->tabs.setVisible (true);
+        safe->resized();
+    });
+}
+
 //==============================================================================
 void WaveForgeEditor::paint (juce::Graphics& g)
 {
@@ -232,4 +258,6 @@ void WaveForgeEditor::resized()
     keyboard.setBounds (footer);
 
     tabs.setBounds (area);
+    if (waveEditor != nullptr)
+        waveEditor->setBounds (area);
 }

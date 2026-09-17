@@ -48,13 +48,17 @@ public:
         frameMix = p - (float) frameA;
     }
 
-    inline float process() noexcept
+    // `phaseMod` is added to the read phase (cycles) without touching the
+    // accumulator: this is what OSC B's FM/phase-mod drives.
+    inline float process (float phaseMod = 0.0f) noexcept
     {
         if (table == nullptr)
             return 0.0f;
 
         const auto& mip = table->getMip (level);
-        const float idx = phase * (float) mip.length;
+        float p = phase + phaseMod;
+        p -= std::floor (p);
+        const float idx = p * (float) mip.length;
         const int i0 = (int) idx;
         const float t = idx - (float) i0;
 
@@ -124,12 +128,12 @@ public:
         gainNorm = gainNorm > 0.0f ? 1.0f / std::sqrt (gainNorm) : 1.0f;
     }
 
-    inline void process (float& outL, float& outR) noexcept
+    inline void process (float& outL, float& outR, float phaseMod = 0.0f) noexcept
     {
         float l = 0.0f, r = 0.0f;
         for (int i = 0; i < numVoices; ++i)
         {
-            const float s = readers[(size_t) i].process();
+            const float s = readers[(size_t) i].process (phaseMod);
             l += s * gainL[(size_t) i];
             r += s * gainR[(size_t) i];
         }

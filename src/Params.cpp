@@ -3,6 +3,7 @@
 #include "dsp/Lfo.h"
 #include "dsp/ModMatrix.h"
 #include "dsp/fx/Distortion.h"
+#include "dsp/Voice.h"
 
 namespace
 {
@@ -86,6 +87,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         layout.add (flt (o.unisonBlend, n + "Unison Blend", unit(), 0.75f));
         layout.add (flt (o.unisonWidth, n + "Unison Width", unit(), 0.5f));
     }
+    layout.add (choice (ParamID::oscAWarpMode, "OSC A Warp Mode", wf::Voice::warpModeNames(), 0));
+    layout.add (flt (ParamID::oscAWarpAmount, "OSC A Warp Amount", unit(), 0.0f));
 
     // ---- SUB
     layout.add (boolean (ParamID::subEnabled, "Sub On", false));

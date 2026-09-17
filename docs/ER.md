@@ -59,6 +59,8 @@ erDiagram
         float pan
         float phase
         bool random_phase
+        enum warp_mode "A のみ: off / fm_b / rm_b / am_b"
+        float warp_amount "A のみ: 0-1"
     }
     UNISON {
         enum osc_id FK "A / B"
@@ -70,8 +72,8 @@ erDiagram
     WAVETABLE {
         string id PK
         string name
-        enum source "builtin / file"
-        string file_path "file のとき"
+        enum source "builtin / file / user (エディタで作成、file と同じ扱い)"
+        string file_path "file / user のとき (user は %APPDATA%/WaveForge/Wavetables)"
         int frame_count "1-256"
         int frame_size "2048 固定"
     }

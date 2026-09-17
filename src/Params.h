@@ -24,6 +24,10 @@ namespace ParamID
                  p + "phase", p + "random_phase", p + "unison_voices", p + "unison_detune",
                  p + "unison_blend", p + "unison_width" };
     }
+
+    // Warp: OSC B modulates OSC A (FM / RM / AM). OSC A only.
+    inline constexpr auto oscAWarpMode   = "osc_a_warp_mode";
+    inline constexpr auto oscAWarpAmount = "osc_a_warp_amount";
     inline juce::String oscPrefix (int index) { return index == 0 ? "OSC A " : "OSC B "; }
 
     // SUB_OSC

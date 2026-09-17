@@ -155,6 +155,8 @@ void Voice::updateControl (const SynthParams& p, int numSamples)
                     juce::jmax (0.0f, o.unisonDetune + detuneMod),
                     o.unisonWidth, o.unisonBlend);
     }
+    warpMode = p.osc[0].warpMode;
+    warpAmount = juce::jlimit (0.0f, 1.0f, p.osc[0].warpAmount + mod[ModDest::oscAWarp]);
     gainA = p.osc[0].enabled ? juce::jlimit (0.0f, 2.0f, p.osc[0].level + mod[ModDest::oscALevel]) : 0.0f;
     gainB = p.osc[1].enabled ? juce::jlimit (0.0f, 2.0f, p.osc[1].level + mod[ModDest::oscBLevel]) : 0.0f;
     panGains (p.osc[0].pan + mod[ModDest::oscAPan], panAL, panAR);
@@ -215,9 +217,27 @@ void Voice::render (juce::AudioBuffer<float>& out, int start, int num, const Syn
             return;
         }
 
+        // B first: its raw (pre-level) mono output can warp A.
         float al, ar, bl, br;
-        oscA.process (al, ar);
         oscB.process (bl, br);
+        const float bMono = 0.5f * (bl + br);
+        switch (warpMode)
+        {
+            case warpFM:   // phase modulation, up to half a cycle at full amount
+                oscA.process (al, ar, bMono * warpAmount * 0.5f);
+                break;
+            case warpRM:   // dry -> fully ring-modulated
+                oscA.process (al, ar);
+                { const float g = 1.0f - warpAmount + warpAmount * bMono; al *= g; ar *= g; }
+                break;
+            case warpAM:   // unipolar version of the above (tremolo-like)
+                oscA.process (al, ar);
+                { const float g = 1.0f - warpAmount + warpAmount * (0.5f + 0.5f * bMono); al *= g; ar *= g; }
+                break;
+            default:
+                oscA.process (al, ar);
+                break;
+        }
         const float s = sub.process() * gainSub;
         const float n = noise.process() * gainNoise;
 

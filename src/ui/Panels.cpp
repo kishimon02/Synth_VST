@@ -31,14 +31,30 @@ OscPanel::OscPanel (WaveForgeProcessor& p, int idx)
 
     tableBox.onChange = [this]
     {
-        const int i = tableBox.getSelectedId() - 1;
-        if (i >= 0 && i != processor.getOscTableIndex (index))
-            processor.setOscTable (index, i);
+        const int item = tableBox.getSelectedId() - 1;
+        if (juce::isPositiveAndBelow (item, (int) tableIndices.size()))
+        {
+            const int bankIndex = tableIndices[(size_t) item];
+            if (bankIndex != processor.getOscTableIndex (index))
+                processor.setOscTable (index, bankIndex);
+        }
     };
     addAndMakeVisible (tableBox);
 
     loadButton.onClick = [this] { chooseFile(); };
+    editButton.onClick = [this] { if (onEdit) onEdit (index); };
     addAndMakeVisible (loadButton);
+    addAndMakeVisible (editButton);
+
+    mode3DButton.onClick   = [this] { setViewMode (Wavetable3DView::mode3D); };
+    mode2DButton.onClick   = [this] { setViewMode (Wavetable3DView::mode2D); };
+    modeSpecButton.onClick = [this] { setViewMode (Wavetable3DView::modeSpectrum); };
+    for (auto* b : { &mode3DButton, &mode2DButton, &modeSpecButton })
+    {
+        b->setClickingTogglesState (false);
+        addAndMakeVisible (b);
+    }
+    setViewMode (Wavetable3DView::mode3D);
     addAndMakeVisible (view);
 
     for (auto* k : { &wtPos, &octave, &semi, &fine, &level, &pan,
@@ -46,23 +62,48 @@ OscPanel::OscPanel (WaveForgeProcessor& p, int idx)
         addAndMakeVisible (k);
     addAndMakeVisible (randomPhase);
 
+    if (index == 0)
+    {
+        warpMode = std::make_unique<ParamCombo> (p.getAPVTS(), ParamID::oscAWarpMode, "Warp");
+        warpAmount = std::make_unique<ParamKnob> (p.getAPVTS(), ParamID::oscAWarpAmount, "Warp Amt", accent);
+        addAndMakeVisible (*warpMode);
+        addAndMakeVisible (*warpAmount);
+    }
+
     refresh();
+}
+
+void OscPanel::setViewMode (Wavetable3DView::Mode m)
+{
+    view.setMode (m);
+    mode3DButton.setToggleState (m == Wavetable3DView::mode3D, juce::dontSendNotification);
+    mode2DButton.setToggleState (m == Wavetable3DView::mode2D, juce::dontSendNotification);
+    modeSpecButton.setToggleState (m == Wavetable3DView::modeSpectrum, juce::dontSendNotification);
 }
 
 void OscPanel::resized()
 {
     auto r = getLocalBounds().reduced (8, 4);
     auto header = r.removeFromTop (titleHeight + 4);
-    title.setBounds (header.removeFromLeft (52));
-    enabled.setBounds (header.removeFromLeft (46));
-    loadButton.setBounds (header.removeFromRight (78).reduced (0, 2));
+    title.setBounds (header.removeFromLeft (50));
+    enabled.setBounds (header.removeFromLeft (40));
+    loadButton.setBounds (header.removeFromRight (50).reduced (2, 2));
+    editButton.setBounds (header.removeFromRight (50).reduced (2, 2));
+    header.removeFromRight (4);
+    modeSpecButton.setBounds (header.removeFromRight (30).reduced (1, 2));
+    mode2DButton.setBounds (header.removeFromRight (30).reduced (1, 2));
+    mode3DButton.setBounds (header.removeFromRight (30).reduced (1, 2));
     tableBox.setBounds (header.reduced (4, 2));
 
     auto rows = r.removeFromBottom (knobRow * 2 + 4);
-    row (rows.removeFromTop (knobRow), { &wtPos, &octave, &semi, &fine, &level, &pan });
+    row (rows.removeFromTop (knobRow), { &wtPos, &octave, &semi, &fine, &level, &pan, &phase });
     rows.removeFromTop (4);
-    row (rows, { &unisonVoices, &unisonDetune, &unisonBlend, &unisonWidth, &phase, &randomPhase },
-         { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.3f });
+    if (warpMode != nullptr)
+        row (rows, { &unisonVoices, &unisonDetune, &unisonBlend, &unisonWidth, &randomPhase, warpMode.get(), warpAmount.get() },
+             { 1.0f, 1.0f, 1.0f, 1.0f, 1.2f, 1.6f, 1.0f });
+    else
+        row (rows, { &unisonVoices, &unisonDetune, &unisonBlend, &unisonWidth, &randomPhase },
+             { 1.0f, 1.0f, 1.0f, 1.0f, 1.2f });
 
     r.removeFromTop (4);
     r.removeFromBottom (6);
@@ -73,9 +114,15 @@ void OscPanel::refresh()
 {
     auto& bank = processor.getBank();
     tableBox.clear (juce::dontSendNotification);
-    for (int t = 0; t < bank.size(); ++t)
-        tableBox.addItem (bank.nameAt (t), t + 1);
-    tableBox.setSelectedId (processor.getOscTableIndex (index) + 1, juce::dontSendNotification);
+    tableIndices = bank.visibleIndices();
+    int item = 1;
+    for (int bankIndex : tableIndices)
+        tableBox.addItem (bank.nameAt (bankIndex), item++);
+
+    const int currentBank = processor.getOscTableIndex (index);
+    for (size_t i = 0; i < tableIndices.size(); ++i)
+        if (tableIndices[i] == currentBank)
+            tableBox.setSelectedId ((int) i + 1, juce::dontSendNotification);
     view.setTable (processor.getOscTable (index));
 }
 

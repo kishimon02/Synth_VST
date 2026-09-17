@@ -39,13 +39,19 @@ void WaveForgeProcessor::setOscTableBySourceId (int osc, const juce::String& sou
     setOscTable (osc, index);
 }
 
-bool WaveForgeProcessor::loadWavetableFile (int osc, const juce::File& file, juce::String& error)
+bool WaveForgeProcessor::loadWavetableFile (int osc, const juce::File& file, juce::String& error, bool forceReload)
 {
-    const int index = bank.addFile (file, error);
+    const int index = forceReload ? bank.reloadFile (file, error) : bank.addFile (file, error);
     if (index < 0)
         return false;
     setOscTable (osc, index);
     return true;
+}
+
+juce::File WaveForgeProcessor::userWavetableDirectory()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("WaveForge").getChildFile ("Wavetables");
 }
 
 //==============================================================================

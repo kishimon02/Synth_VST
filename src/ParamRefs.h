@@ -16,6 +16,7 @@ struct ParamRefs
     };
 
     Osc osc[2];
+    P oscAWarpMode, oscAWarpAmount;
     P subEnabled, subShape, subOctave, subLevel, subDirect;
     P noiseEnabled, noiseType, noiseLevel;
     P filterEnabled, filterType, filterCutoff, filterResonance, filterDrive, filterKeyTrack,
@@ -50,6 +51,7 @@ struct ParamRefs
                        get (o.level), get (o.pan), get (o.phase), get (o.randomPhase),
                        get (o.unisonVoices), get (o.unisonDetune), get (o.unisonBlend), get (o.unisonWidth) };
         }
+        oscAWarpMode = get (ParamID::oscAWarpMode); oscAWarpAmount = get (ParamID::oscAWarpAmount);
         subEnabled = get (ParamID::subEnabled); subShape = get (ParamID::subShape);
         subOctave = get (ParamID::subOctave);   subLevel = get (ParamID::subLevel);
         subDirect = get (ParamID::subDirect);
@@ -140,6 +142,8 @@ struct ParamRefs
             d.unisonBlend = f (o.unisonBlend);
             d.unisonWidth = f (o.unisonWidth);
         }
+        s.osc[0].warpMode = n (oscAWarpMode);
+        s.osc[0].warpAmount = f (oscAWarpAmount);
 
         s.sub = { b (subEnabled), n (subShape), n (subOctave), f (subLevel), b (subDirect) };
         s.noise = { b (noiseEnabled), n (noiseType), f (noiseLevel) };
