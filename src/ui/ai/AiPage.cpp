@@ -30,9 +30,8 @@ AiPage::AiPage (WaveForgeProcessor& p)
 
     hintLabel.setColour (juce::Label::textColourId, colours::textDim);
     hintLabel.setFont (juce::FontOptions (11.5f));
-    hintLabel.setText (jp("Rec で演奏 / 再生中の MIDI を取り込み、.mid をここにドロップすると他トラックも渡せます。"
-                          "Presets とクイックボタンは入力欄に入るだけなので、書き足してから Send で送信。"
-                          "貼り付けは Paste ボタン (DAW 内では Ctrl+V が効きません)。"),
+    hintLabel.setText (jp("取り込みは 3 通り: Rec で演奏 / 再生中の MIDI、DAW のパートをここにドラッグ、Add .mid... で読み込み。"
+                          "DAW の「コピー」は DAW 内部の形式なので貼り付けられません。文字の貼り付けは Paste ボタンで。"),
                        juce::dontSendNotification);
     addAndMakeVisible (hintLabel);
 
@@ -437,19 +436,66 @@ void AiPage::addMidiFile (const juce::File& file)
     refreshContextLabel();
 }
 
+static bool looksLikeMidiFile (const juce::String& path)
+{
+    const auto p = path.trim().unquoted();
+    return p.endsWithIgnoreCase (".mid") || p.endsWithIgnoreCase (".midi");
+}
+
 bool AiPage::isInterestedInFileDrag (const juce::StringArray& files)
 {
     for (const auto& f : files)
-        if (f.endsWithIgnoreCase (".mid") || f.endsWithIgnoreCase (".midi"))
+        if (looksLikeMidiFile (f))
             return true;
     return false;
 }
 
+void AiPage::fileDragEnter (const juce::StringArray&, int, int)
+{
+    dragOver = true;
+    repaint();
+}
+
+void AiPage::fileDragExit (const juce::StringArray&)
+{
+    dragOver = false;
+    repaint();
+}
+
 void AiPage::filesDropped (const juce::StringArray& files, int, int)
 {
+    dragOver = false;
+    repaint();
     for (const auto& f : files)
-        if (f.endsWithIgnoreCase (".mid") || f.endsWithIgnoreCase (".midi"))
+        if (looksLikeMidiFile (f))
             addMidiFile (juce::File (f));
+}
+
+bool AiPage::isInterestedInTextDrag (const juce::String& text)
+{
+    const auto path = text.trim().unquoted();
+    return looksLikeMidiFile (path) && juce::File::isAbsolutePath (path);
+}
+
+void AiPage::textDragEnter (const juce::String&, int, int)
+{
+    dragOver = true;
+    repaint();
+}
+
+void AiPage::textDragExit (const juce::String&)
+{
+    dragOver = false;
+    repaint();
+}
+
+void AiPage::textDropped (const juce::String& text, int, int)
+{
+    dragOver = false;
+    repaint();
+    const juce::File file (text.trim().unquoted());
+    if (file.existsAsFile())
+        addMidiFile (file);
 }
 
 //==============================================================================
@@ -460,6 +506,16 @@ void AiPage::paint (juce::Graphics& g)
     g.fillRoundedRectangle (r, 8.0f);
     g.setColour (colours::panelEdge);
     g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
+
+    if (dragOver)
+    {
+        g.setColour (colours::accentFx.withAlpha (0.12f));
+        g.fillRoundedRectangle (r, 8.0f);
+        g.setColour (colours::accentFx);
+        g.drawRoundedRectangle (r.reduced (2.0f), 8.0f, 2.5f);
+        g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+        g.drawText (jp("ここにドロップして取り込む (.mid)"), getLocalBounds(), juce::Justification::centred);
+    }
 }
 
 void AiPage::resized()
