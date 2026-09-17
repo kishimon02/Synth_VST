@@ -1,0 +1,34 @@
+# Build outputs
+build/
+out/
+*.vst3/
+*.exe
+*.pdb
+*.ilk
+*.obj
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+
+# IDE
+.vs/
+.cache/
+.vscode/ipch/
+.vscode/browse.vc.db*
+*.user
+*.suo
+
+# JUCE fetched sources (FetchContent puts them under build/)
+_deps/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Secrets (never commit API keys)
+*.env
+settings.local.json

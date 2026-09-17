@@ -1,0 +1,84 @@
+# WaveForge
+
+Studio One 4 (Windows x64) 向けの Serum 風ウェーブテーブル・シンセサイザー VST3。
+3D ウェーブテーブル表示と、LLM (Claude API) によるメロディ / コード / ドラム提案機能を持つ。
+
+- 設計: [docs/ER.md](docs/ER.md) (データモデル)、`~/.claude/plans/` の実装計画
+- フレームワーク: JUCE 8 (CMake FetchContent で自動取得)
+- コンパイラ: Visual Studio 2022 Build Tools (MSVC)。エディタは VS Code
+
+## 必要なもの
+
+| ツール | 入手 |
+|---|---|
+| CMake 3.22+ | 導入済み (4.2) |
+| Visual Studio 2022 Build Tools + "C++ によるデスクトップ開発" ワークロード | `winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"` |
+| Git | 導入済み |
+
+## ビルド (コマンドライン)
+
+```bash
+cmake --preset vs2022
+cmake --build --preset vs2022-release
+```
+
+初回は JUCE のダウンロードとビルドで 5〜10 分かかる。JUCE を手元に clone 済みなら
+`cmake --preset vs2022 -DFETCHCONTENT_SOURCE_DIR_JUCE=<path>` でダウンロードを省略できる
+(この開発機では `build/_juce-src` に 8.0.15 を shallow clone 済み)。成果物:
+
+- Standalone: `build/vs2022/WaveForge_artefacts/Release/Standalone/WaveForge.exe`
+- VST3: `build/vs2022/WaveForge_artefacts/Release/VST3/WaveForge.vst3/` (JUCE のバンドル形式)
+  → ビルド後に **単一ファイル形式** `C:\Program Files\Common Files\VST3\kishimon\WaveForge.vst3` として自動コピーされる。
+  - Studio One 4.x のスキャナーはバンドル (フォルダ) 形式を認識せず、さらに VST3 は
+    `Common Files\VST3` 配下からしか読み込まない (追加ロケーションは効かなかった)。
+  - `kishimon` フォルダは管理者権限で 1 回だけ作成し、現在のユーザーに変更権限を付与済み:
+    ```powershell
+    # 管理者 PowerShell で 1 回だけ
+    New-Item -ItemType Directory -Force "C:\Program Files\Common Files\VST3\kishimon"
+    icacls "C:\Program Files\Common Files\VST3\kishimon" /grant "$env:USERDOMAIN\$env:USERNAME:(OI)(CI)M" /T
+    ```
+
+## ビルド (VS Code)
+
+CMake Tools 拡張が `CMakePresets.json` を読む。コマンドパレットで
+「CMake: Select Configure Preset」→ `ninja-msvc` (要 MSVC kit) または `vs2022` を選び、
+「CMake: Build」。
+
+## Studio One 4 で認識させる
+
+1. 上記のとおり `C:\Program Files\Common Files\VST3\kishimon\WaveForge.vst3` に配置されていることを確認
+2. オプション → 場所 → VST プラグイン で「起動時にスキャン」にチェックを入れ、Studio One を **再起動** する
+   (スキャンは起動時に行われる。`Common Files\VST3` は標準ロケーションなので追加不要)
+3. ブラウザの「インストゥルメント」→ ベンダー **kishimon** (または「全体」表示) に **WaveForge** が現れるので、
+   インストゥルメント・トラックに挿入する
+4. 認識されない場合は `%APPDATA%\PreSonus\Studio One 4\x64\PlugInScanner.log` を確認する
+
+## DSP ユニットテスト
+
+```bash
+cmake --build --preset vs2022-release --target WaveForgeTests
+```
+
+`build/vs2022/WaveForgeTests_artefacts/Release/WaveForgeTests.exe` を実行。ミップマップの帯域制限精度、
+オシレーターの周波数精度、ADSR のタイミング、エンジン全体のレンダリング (有限・不連続なし・解放後に無音) を検証する。
+
+## 現在の状態
+
+- Phase 0 (環境・骨組み) 完了
+- Phase 1 (ウェーブテーブル・エンジン) 実装済み: WT Osc A/B (ユニゾン 8 まで、ミップマップ帯域制限)、Sub、Noise、
+  SVF フィルター (LP/HP/BP 12/24dB、ドライブ、キートラック、Env2 モジュレーション)、ADSR×2、Serum 互換 .wav 読込、
+  内蔵テーブル (Basic Shapes / Sine / Harmonics / PWM)、暫定 UI (2D 波形表示 + 汎用パラメータ一覧 + 鍵盤)
+- 次: Phase 2 (LFO、モジュレーションマトリクス、プリセット)、Phase 3 (FX)、Phase 4 (3D 表示・本 UI)、Phase 5 (AI)
+
+## 音のテスト時の注意
+
+- **Bluetooth イヤホンでは判断しない。** 純粋なサイン波など単純な音は Bluetooth コーデック/電波の微小な
+  途切れが「パチパチ」として聞こえる (Phase 0 で計測済み: プラグイン出力とループバック録音はクリーン、
+  スピーカー出力では無音)。有線イヤホンかスピーカーで確認する。
+- グリッチ調査には `-DWAVEFORGE_DIAGNOSTICS=1` でビルドすると `%TEMP%\WaveForge_diag.log` に
+  出力の不連続・処理時間・ホスト呼び出し間隔が 2 秒ごとに記録される。
+
+## Standalone で MIDI キーボードを使う
+
+Standalone を起動 → 左上の「Options」→「Audio/MIDI Settings」→ MIDI Inputs で鍵盤を有効化。
+画面下の鍵盤はマウス / PC キーボードでも演奏できる。

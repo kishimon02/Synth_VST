@@ -1,0 +1,31 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 22, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "vs2022",
+      "displayName": "Visual Studio 2022 (x64, multi-config)",
+      "description": "Works from any shell; MSBuild-based. Use this for command-line builds.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "binaryDir": "${sourceDir}/build/vs2022"
+    },
+    {
+      "name": "ninja-msvc",
+      "displayName": "Ninja + MSVC (fast incremental, VS Code CMake Tools)",
+      "description": "Requires the MSVC environment (VS Code CMake Tools kit or a Developer Command Prompt).",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/ninja",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "vs2022-debug",   "configurePreset": "vs2022",     "configuration": "Debug" },
+    { "name": "vs2022-release", "configurePreset": "vs2022",     "configuration": "Release" },
+    { "name": "ninja-debug",    "configurePreset": "ninja-msvc", "configuration": "Debug" },
+    { "name": "ninja-release",  "configurePreset": "ninja-msvc", "configuration": "Release" }
+  ]
+}
