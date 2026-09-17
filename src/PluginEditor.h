@@ -24,7 +24,10 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
     void refreshTableCombos();
+    void refreshPresetMenu();
     void chooseFile (int osc);
+    void savePresetAs();
+    void loadPresetFile();
 
     struct OscRow
     {
@@ -36,6 +39,12 @@ private:
 
     WaveForgeProcessor& processor;
     juce::Label title;
+
+    juce::Label      presetLabel { {}, "Preset" };
+    juce::ComboBox   presetBox;
+    juce::TextButton savePresetButton { "Save As..." };
+    juce::TextButton loadPresetButton { "Load..." };
+
     OscRow oscRows[2];
     juce::Viewport paramViewport;
     juce::GenericAudioProcessorEditor genericParams;

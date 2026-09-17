@@ -1,5 +1,8 @@
 #include "Params.h"
 
+#include "dsp/Lfo.h"
+#include "dsp/ModMatrix.h"
+
 namespace
 {
     using Layout = juce::AudioProcessorValueTreeState::ParameterLayout;
@@ -104,6 +107,33 @@ juce::AudioProcessorValueTreeState::ParameterLayout Params::createLayout()
         layout.add (flt (e.decay,   n + "Decay",   timeMs(), i == 0 ? 200.0f : 300.0f, "ms"));
         layout.add (flt (e.sustain, n + "Sustain", unit(), i == 0 ? 0.8f : 0.0f));
         layout.add (flt (e.release, n + "Release", timeMs(), i == 0 ? 150.0f : 200.0f, "ms"));
+    }
+
+    // ---- LFO 1 / 2
+    for (int i = 0; i < 2; ++i)
+    {
+        const auto l = ParamID::lfo (i);
+        const juce::String n = "LFO " + juce::String (i + 1) + " ";
+        layout.add (choice (l.shape, n + "Shape", { "Sine", "Triangle", "Saw", "Square", "S&H" }, 0));
+        layout.add (boolean (l.tempoSync, n + "Tempo Sync", false));
+        layout.add (flt (l.rate, n + "Rate", skewed (0.01f, 40.0f, 2.0f), i == 0 ? 2.0f : 0.5f, "Hz"));
+        layout.add (choice (l.division, n + "Division", wf::Lfo::divisionNames(), 5));
+        layout.add (boolean (l.retrigger, n + "Retrigger", true));
+        layout.add (flt (l.phase, n + "Phase", unit(), 0.0f));
+        layout.add (boolean (l.unipolar, n + "Unipolar", false));
+    }
+
+    // ---- MOD MATRIX (8 slots)
+    const auto sourceNames = wf::ModSource::names();
+    const auto destNames   = wf::ModDest::names();
+    for (int i = 0; i < wf::numModSlots; ++i)
+    {
+        const auto m = ParamID::modSlot (i);
+        const juce::String n = "Mod " + juce::String (i + 1) + " ";
+        layout.add (boolean (m.enabled, n + "On", false));
+        layout.add (choice (m.source, n + "Source", sourceNames, 0));
+        layout.add (choice (m.dest, n + "Dest", destNames, 0));
+        layout.add (flt (m.amount, n + "Amount", Range (-1.0f, 1.0f, 0.001f), 0.0f));
     }
 
     return layout;

@@ -22,9 +22,9 @@ public:
     void allNotesOff (bool immediate);
     int  getActiveVoiceCount() const noexcept;
 
-    // Last known controller state (used by the mod matrix in Phase 2).
     float getModWheel() const noexcept   { return modWheel; }
     float getAftertouch() const noexcept { return aftertouch; }
+    float getGlobalLfoPhase (int index) const noexcept { return globalLfoPhase[(size_t) index]; }
 
 private:
     void handleMidi (const juce::MidiMessage& m, const SynthParams& p);
@@ -32,6 +32,7 @@ private:
     void noteOff (int note);
     Voice* findFreeVoice (const SynthParams& p);
     void renderSegment (juce::AudioBuffer<float>& out, int start, int num, const SynthParams& p);
+    void pushControllersToVoices() noexcept;
 
     std::array<Voice, maxVoices> voices;
     std::array<bool, 128> heldKeys {};        // physically held
@@ -39,6 +40,11 @@ private:
     bool sustainPedal = false;
     float pitchBendSemis = 0.0f, modWheel = 0.0f, aftertouch = 0.0f;
     uint32_t ageCounter = 0;
+
+    // Free-running master phase per LFO. Voices in free mode copy it at
+    // note-on and then advance at the same rate, so they stay locked.
+    double sampleRate = 44100.0;
+    std::array<float, 2> globalLfoPhase { 0.0f, 0.0f };
 };
 
 } // namespace wf

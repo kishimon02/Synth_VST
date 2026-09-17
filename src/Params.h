@@ -59,6 +59,23 @@ namespace ParamID
         return { p + "attack", p + "decay", p + "sustain", p + "release" };
     }
 
+    // LFO (1, 2)
+    struct LfoIDs { juce::String shape, tempoSync, rate, division, retrigger, phase, unipolar; };
+    inline LfoIDs lfo (int index)
+    {
+        const juce::String p = "lfo" + juce::String (index + 1) + "_";
+        return { p + "shape", p + "tempo_sync", p + "rate", p + "division",
+                 p + "retrigger", p + "phase", p + "unipolar" };
+    }
+
+    // MOD_SLOT (0..7)
+    struct ModSlotIDs { juce::String enabled, source, dest, amount; };
+    inline ModSlotIDs modSlot (int index)
+    {
+        const juce::String p = "mod" + juce::String (index + 1) + "_";
+        return { p + "enabled", p + "source", p + "dest", p + "amount" };
+    }
+
     // Non-parameter state stored as properties on the APVTS ValueTree.
     inline const juce::Identifier oscTableProperty (int index) { return index == 0 ? "osc_a_table" : "osc_b_table"; }
 }

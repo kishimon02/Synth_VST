@@ -4,6 +4,10 @@
 
 #include <juce_core/juce_core.h>
 #include <juce_dsp/juce_dsp.h>
+#include <juce_audio_processors/juce_audio_processors.h>
+
+#include "Params.h"
+#include "PresetManager.h"
 
 #include "dsp/Wavetable.h"
 #include "dsp/WavetableLoader.h"
@@ -188,6 +192,259 @@ struct EngineRenderTest final : public juce::UnitTest
     }
 };
 
+struct LfoTest final : public juce::UnitTest
+{
+    LfoTest() : juce::UnitTest ("LFO", "DSP") {}
+
+    void runTest() override
+    {
+        constexpr double sr = 48000.0;
+        constexpr int control = wf::Voice::controlInterval;
+
+        beginTest ("a 1 Hz sine LFO completes exactly one cycle per second");
+        wf::Lfo lfo;
+        lfo.setSampleRate (sr);
+        lfo.reset (0.0f, 1234u);
+        lfo.setRate (1.0f);
+
+        float minV = 1.0f, maxV = -1.0f;
+        int zeroCrossings = 0;
+        float prev = lfo.processControl (wf::Lfo::sine, 0);
+        for (int i = 0; i < (int) (sr / control); ++i) // 1 second
+        {
+            const float v = lfo.processControl (wf::Lfo::sine, control);
+            minV = juce::jmin (minV, v);
+            maxV = juce::jmax (maxV, v);
+            if ((prev < 0.0f) != (v < 0.0f)) ++zeroCrossings;
+            prev = v;
+        }
+        expectWithinAbsoluteError (maxV, 1.0f, 0.01f, "peak");
+        expectWithinAbsoluteError (minV, -1.0f, 0.01f, "trough");
+        expectEquals (zeroCrossings, 2, "two zero crossings per cycle");
+
+        beginTest ("every shape stays inside -1..1");
+        for (int shape = 0; shape < wf::Lfo::numShapes; ++shape)
+        {
+            wf::Lfo l;
+            l.setSampleRate (sr);
+            l.reset (0.0f, (uint32_t) (shape + 1) * 7919u);
+            l.setRate (7.3f);
+            for (int i = 0; i < 4000; ++i)
+            {
+                const float v = l.processControl (shape, control);
+                expect (std::isfinite (v) && v >= -1.001f && v <= 1.001f,
+                        "shape " + juce::String (shape));
+            }
+        }
+
+        beginTest ("tempo sync maps divisions to the right rate");
+        // 1 bar at 120 BPM in 4/4 = 2 s = 0.5 Hz; 1/4 = 2 Hz.
+        expectWithinAbsoluteError (wf::Lfo::syncedRateHz (120.0f, 3), 0.5f, 1.0e-4f, "1 bar");
+        expectWithinAbsoluteError (wf::Lfo::syncedRateHz (120.0f, 5), 2.0f, 1.0e-4f, "1/4");
+        expectWithinAbsoluteError (wf::Lfo::syncedRateHz (120.0f, 6), 4.0f, 1.0e-4f, "1/8");
+        // A host that reports no tempo must not produce a NaN rate.
+        expect (std::isfinite (wf::Lfo::syncedRateHz (0.0f, 5)), "zero BPM guarded");
+
+        beginTest ("free-running voices stay phase-locked to the master phase");
+        const float inc = (float) (3.0f / sr);
+        float master = 0.0f;
+        wf::Lfo voice;
+        voice.setSampleRate (sr);
+        voice.setRate (3.0f);
+        // Master runs for a while, then a voice starts from its phase.
+        for (int b = 0; b < 20; ++b) master = wf::Lfo::advancePhase (master, inc, 256);
+        voice.reset (master, 99u);
+        for (int b = 0; b < 200; ++b)
+        {
+            master = wf::Lfo::advancePhase (master, inc, control);
+            voice.processControl (wf::Lfo::sine, control);
+        }
+        const float diff = std::abs (voice.getPhase() - master);
+        expect (juce::jmin (diff, 1.0f - diff) < 1.0e-3f, "phases still aligned");
+    }
+};
+
+struct ModMatrixTest final : public juce::UnitTest
+{
+    ModMatrixTest() : juce::UnitTest ("Modulation matrix", "DSP") {}
+
+    void runTest() override
+    {
+        beginTest ("slots accumulate into their destination in the destination's units");
+
+        wf::ModSlotParams slots[wf::numModSlots];
+        slots[0] = { true, wf::ModSource::lfo1, wf::ModDest::filterCutoff, 0.5f };
+        slots[1] = { true, wf::ModSource::env2, wf::ModDest::filterCutoff, 0.25f };
+        slots[2] = { true, wf::ModSource::velocity, wf::ModDest::oscAWtPos, 1.0f };
+        slots[3] = { false, wf::ModSource::lfo2, wf::ModDest::oscAWtPos, 1.0f }; // disabled
+        slots[4] = { true, wf::ModSource::lfo2, wf::ModDest::none, 1.0f };       // no destination
+        slots[5] = { true, wf::ModSource::none, wf::ModDest::oscBPitch, 1.0f };  // no source
+
+        float sources[wf::ModSource::count] = {};
+        sources[wf::ModSource::lfo1] = 1.0f;
+        sources[wf::ModSource::lfo2] = 1.0f;
+        sources[wf::ModSource::env2] = 0.5f;
+        sources[wf::ModSource::velocity] = 0.8f;
+
+        float mod[wf::ModDest::count];
+        wf::accumulateModulation (slots, sources, mod);
+
+        // cutoff full scale is 96 semitones: 0.5*1*96 + 0.25*0.5*96 = 48 + 12
+        expectWithinAbsoluteError (mod[wf::ModDest::filterCutoff], 60.0f, 1.0e-4f, "two slots summed");
+        expectWithinAbsoluteError (mod[wf::ModDest::oscAWtPos], 0.8f, 1.0e-4f, "normalised destination");
+        expectWithinAbsoluteError (mod[wf::ModDest::oscBPitch], 0.0f, 1.0e-6f, "source None contributes nothing");
+        expectWithinAbsoluteError (mod[wf::ModDest::oscBWtPos], 0.0f, 1.0e-6f, "untouched destination is zero");
+
+        beginTest ("source and destination name lists match the enums");
+        expectEquals (wf::ModSource::names().size(), (int) wf::ModSource::count);
+        expectEquals (wf::ModDest::names().size(), (int) wf::ModDest::count);
+
+        beginTest ("an LFO routed to the filter actually changes the output");
+        auto table = wf::WavetableLoader::createBuiltin ("Basic Shapes");
+        constexpr double sr = 48000.0;
+        constexpr int block = 256;
+
+        auto renderPeakSpread = [&] (bool modEnabled)
+        {
+            wf::SynthParams p;
+            p.osc[0].table = table.get();
+            p.osc[0].wtPosition = 0.9f;
+            p.filter.type = 1;
+            p.filter.cutoffHz = 500.0f;
+            p.lfo[0] = { wf::Lfo::sine, false, 4.0f, 5, true, 0.0f, false };
+            p.modSlots[0] = { modEnabled, wf::ModSource::lfo1, wf::ModDest::filterCutoff, 0.8f };
+
+            wf::SynthEngine engine;
+            engine.prepare (sr);
+            juce::AudioBuffer<float> out (2, block);
+            juce::MidiBuffer midi;
+            midi.addEvent (juce::MidiMessage::noteOn (1, 48, 0.9f), 0);
+
+            float lo = 1.0e9f, hi = 0.0f;
+            for (int b = 0; b < (int) (sr / block); ++b) // 1 s, covering 4 LFO cycles
+            {
+                out.clear();
+                engine.process (out, midi, p);
+                midi.clear();
+                if (b > 20) // skip the attack
+                {
+                    const float mag = out.getMagnitude (0, 0, block);
+                    lo = juce::jmin (lo, mag);
+                    hi = juce::jmax (hi, mag);
+                }
+            }
+            return hi - lo;
+        };
+
+        const float spreadOff = renderPeakSpread (false);
+        const float spreadOn  = renderPeakSpread (true);
+        logMessage ("peak spread: mod off=" + juce::String (spreadOff, 4)
+                    + "  mod on=" + juce::String (spreadOn, 4));
+        expectGreaterThan (spreadOn, spreadOff * 3.0f, "modulation audibly sweeps the filter");
+    }
+};
+
+// Minimal host for an APVTS, so presets can be tested without the plugin.
+struct DummyProcessor final : public juce::AudioProcessor
+{
+    DummyProcessor() : apvts (*this, nullptr, "WaveForgeState", Params::createLayout()) {}
+
+    const juce::String getName() const override { return "Dummy"; }
+    void prepareToPlay (double, int) override {}
+    void releaseResources() override {}
+    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+    bool acceptsMidi() const override { return true; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+
+    juce::AudioProcessorValueTreeState apvts;
+};
+
+struct PresetTest final : public juce::UnitTest
+{
+    PresetTest() : juce::UnitTest ("Presets", "State") {}
+
+    void runTest() override
+    {
+        DummyProcessor proc;
+        auto& apvts = proc.apvts;
+
+        beginTest ("every factory preset references parameters that exist");
+        for (const auto& preset : PresetManager::factoryPresets())
+        {
+            expect (preset.tableA.isNotEmpty(), preset.name + " has no OSC A table");
+            expect (preset.tableB.isNotEmpty(), preset.name + " has no OSC B table");
+            for (const auto& [id, value] : preset.values)
+            {
+                auto* param = apvts.getParameter (id);
+                expect (param != nullptr, preset.name + ": unknown parameter '" + id + "'");
+                if (param == nullptr)
+                    continue;
+
+                // A value outside the parameter's range would be silently
+                // clamped, so the preset would not sound as written.
+                const auto range = param->getNormalisableRange();
+                expect (value >= range.start - 1.0e-4f && value <= range.end + 1.0e-4f,
+                        preset.name + ": " + id + " value " + juce::String (value)
+                            + " is outside [" + juce::String (range.start) + ", "
+                            + juce::String (range.end) + "]");
+            }
+        }
+
+        beginTest ("applying a preset changes parameters, and Init restores the defaults");
+        const auto* supersaw = PresetManager::findFactory ("Supersaw Lead");
+        expect (supersaw != nullptr);
+
+        auto* unison = apvts.getParameter (ParamID::osc (0).unisonVoices);
+        auto* master = apvts.getParameter (ParamID::masterVolume);
+        expect (unison != nullptr && master != nullptr);
+
+        const float unisonDefault = unison->getNormalisableRange().convertFrom0to1 (unison->getDefaultValue());
+        const float masterDefault = master->getNormalisableRange().convertFrom0to1 (master->getDefaultValue());
+        logMessage ("defaults: unison=" + juce::String (unisonDefault, 2)
+                    + " master=" + juce::String (masterDefault, 2) + " dB");
+        expectWithinAbsoluteError (masterDefault, -6.0f, 0.01f, "master volume default");
+
+        PresetManager::applyFactory (apvts, *supersaw);
+        expectWithinAbsoluteError (unison->getNormalisableRange().convertFrom0to1 (unison->getValue()),
+                                   7.0f, 0.01f, "unison voices after Supersaw Lead");
+
+        PresetManager::applyFactory (apvts, *PresetManager::findFactory ("Init"));
+        expectWithinAbsoluteError (unison->getNormalisableRange().convertFrom0to1 (unison->getValue()),
+                                   unisonDefault, 0.01f, "unison voices back to default");
+        expectWithinAbsoluteError (master->getNormalisableRange().convertFrom0to1 (master->getValue()),
+                                   masterDefault, 0.01f, "master volume back to default");
+
+        beginTest ("a preset survives a save/load round trip");
+        PresetManager::applyFactory (apvts, *PresetManager::findFactory ("Wobble Bass"));
+        const auto saved = apvts.copyState();
+
+        auto file = juce::File::createTempFile (PresetManager::fileExtension);
+        juce::String error;
+        expect (PresetManager::saveToFile (saved, file, error), error);
+
+        PresetManager::applyFactory (apvts, *PresetManager::findFactory ("Init"));
+        juce::ValueTree restored;
+        expect (PresetManager::loadFromFile (file, restored, error), error);
+        apvts.replaceState (restored);
+
+        auto* cutoff = apvts.getParameter (ParamID::filterCutoff);
+        expectWithinAbsoluteError (cutoff->getNormalisableRange().convertFrom0to1 (cutoff->getValue()),
+                                   420.0f, 1.0f, "filter cutoff after round trip");
+        file.deleteFile();
+    }
+};
+
 struct StdoutRunner final : public juce::UnitTestRunner
 {
     void logMessage (const juce::String& m) override { std::cout << m << std::endl; }
@@ -197,6 +454,9 @@ static WavetableMipTest wavetableMipTest;
 static OscillatorTest oscillatorTest;
 static EnvelopeTest envelopeTest;
 static EngineRenderTest engineRenderTest;
+static LfoTest lfoTest;
+static ModMatrixTest modMatrixTest;
+static PresetTest presetTest;
 
 int main()
 {

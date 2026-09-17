@@ -21,6 +21,8 @@ struct ParamRefs
     P filterEnabled, filterType, filterCutoff, filterResonance, filterDrive, filterKeyTrack,
       filterRouteA, filterRouteB, filterRouteSub, filterRouteNoise, filterEnv2Amount;
     struct Env { P attack, decay, sustain, release; } env[2];
+    struct Lfo { P shape, tempoSync, rate, division, retrigger, phase, unipolar; } lfo[2];
+    struct Mod { P enabled, source, dest, amount; } mod[wf::numModSlots];
     P masterVolume, polyphony, pitchBendRange;
 
     void bind (juce::AudioProcessorValueTreeState& apvts)
@@ -59,12 +61,25 @@ struct ParamRefs
             env[i] = { get (e.attack), get (e.decay), get (e.sustain), get (e.release) };
         }
 
+        for (int i = 0; i < 2; ++i)
+        {
+            const auto l = ParamID::lfo (i);
+            lfo[i] = { get (l.shape), get (l.tempoSync), get (l.rate), get (l.division),
+                       get (l.retrigger), get (l.phase), get (l.unipolar) };
+        }
+
+        for (int i = 0; i < wf::numModSlots; ++i)
+        {
+            const auto m = ParamID::modSlot (i);
+            mod[i] = { get (m.enabled), get (m.source), get (m.dest), get (m.amount) };
+        }
+
         masterVolume = get (ParamID::masterVolume);
         polyphony = get (ParamID::polyphony);
         pitchBendRange = get (ParamID::pitchBendRange);
     }
 
-    wf::SynthParams snapshot (const wf::Wavetable* tableA, const wf::Wavetable* tableB) const
+    wf::SynthParams snapshot (const wf::Wavetable* tableA, const wf::Wavetable* tableB, float bpm) const
     {
         wf::SynthParams s;
         auto f = [] (P p) { return p->load (std::memory_order_relaxed); };
@@ -109,6 +124,14 @@ struct ParamRefs
         for (int i = 0; i < 2; ++i)
             s.env[i] = { f (env[i].attack), f (env[i].decay), f (env[i].sustain), f (env[i].release) };
 
+        for (int i = 0; i < 2; ++i)
+            s.lfo[i] = { n (lfo[i].shape), b (lfo[i].tempoSync), f (lfo[i].rate), n (lfo[i].division),
+                         b (lfo[i].retrigger), f (lfo[i].phase), b (lfo[i].unipolar) };
+
+        for (int i = 0; i < wf::numModSlots; ++i)
+            s.modSlots[i] = { b (mod[i].enabled), n (mod[i].source), n (mod[i].dest), f (mod[i].amount) };
+
+        s.bpm = bpm;
         s.global.masterGain = juce::Decibels::decibelsToGain (f (masterVolume), -60.0f);
         s.global.polyphony = n (polyphony);
         s.global.pitchBendRange = n (pitchBendRange);

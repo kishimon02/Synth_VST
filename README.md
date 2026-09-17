@@ -60,15 +60,28 @@ cmake --build --preset vs2022-release --target WaveForgeTests
 ```
 
 `build/vs2022/WaveForgeTests_artefacts/Release/WaveForgeTests.exe` を実行。ミップマップの帯域制限精度、
-オシレーターの周波数精度、ADSR のタイミング、エンジン全体のレンダリング (有限・不連続なし・解放後に無音) を検証する。
+オシレーターの周波数精度、ADSR のタイミング、LFO の周波数とテンポ同期、モジュレーションマトリクスの加算、
+プリセットのパラメータ ID 妥当性と保存/読込、エンジン全体のレンダリング (有限・不連続なし・解放後に無音) を検証する。
+
+## プリセット
+
+- ファクトリー: Init / Supersaw Lead / Soft Pad / Wobble Bass / Glass Bell (コード内で定義、インストール不要)
+- ユーザー: 画面上部の「Save As...」で `%APPDATA%\WaveForge\Presets\*.wfpreset` に保存、「Load...」で読込
+- ソング保存時の状態と同じ内容を書き出すので、プリセットとソングで設定が食い違わない
 
 ## 現在の状態
 
 - Phase 0 (環境・骨組み) 完了
-- Phase 1 (ウェーブテーブル・エンジン) 実装済み: WT Osc A/B (ユニゾン 8 まで、ミップマップ帯域制限)、Sub、Noise、
+- Phase 1 (ウェーブテーブル・エンジン) 完了: WT Osc A/B (ユニゾン 8 まで、ミップマップ帯域制限)、Sub、Noise、
   SVF フィルター (LP/HP/BP 12/24dB、ドライブ、キートラック、Env2 モジュレーション)、ADSR×2、Serum 互換 .wav 読込、
   内蔵テーブル (Basic Shapes / Sine / Harmonics / PWM)、暫定 UI (2D 波形表示 + 汎用パラメータ一覧 + 鍵盤)
-- 次: Phase 2 (LFO、モジュレーションマトリクス、プリセット)、Phase 3 (FX)、Phase 4 (3D 表示・本 UI)、Phase 5 (AI)
+- Phase 2 (モジュレーション) 完了:
+  - LFO×2: Sine / Triangle / Saw / Square / S&H、Hz 指定とテンポ同期 (8 小節〜1/32、3 連・付点)、
+    リトリガー / フリーラン (フリーラン時は全ボイスが位相同期)、ユニポーラ切替
+  - モジュレーションマトリクス 8 スロット: ソース 9 種 (Env1/2、LFO1/2、ベロシティ、モジュレーションホイール、
+    アフタータッチ、キートラック、ノートごとのランダム)、デスティネーション 16 種
+  - プリセット (上記)、ホストからのテンポ取得
+- 次: Phase 3 (FX)、Phase 4 (3D 表示・本 UI)、Phase 5 (AI アシスタント)、Phase 6 (仕上げ)
 
 ## 音のテスト時の注意
 

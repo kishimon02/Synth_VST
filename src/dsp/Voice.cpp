@@ -12,8 +12,14 @@ namespace
 
     inline void panGains (float pan, float& l, float& r) noexcept
     {
-        l = std::sqrt (0.5f * (1.0f - pan));
-        r = std::sqrt (0.5f * (1.0f + pan));
+        const float p = juce::jlimit (-1.0f, 1.0f, pan);
+        l = std::sqrt (0.5f * (1.0f - p));
+        r = std::sqrt (0.5f * (1.0f + p));
+    }
+
+    inline float lfoRate (const LfoParams& lp, float bpm) noexcept
+    {
+        return lp.tempoSync ? Lfo::syncedRateHz (bpm, lp.syncDivision) : lp.rateHz;
     }
 }
 
@@ -25,6 +31,8 @@ void Voice::prepare (double sr)
     sub.setSampleRate (sr);
     env1.setSampleRate (sr);
     env2.setSampleRate (sr);
+    for (auto& l : lfo)
+        l.setSampleRate (sr);
     filter.prepare (sr);
     rng.setSeed ((juce::int64) this);
     noise.seed ((uint32_t) rng.nextInt());
@@ -32,22 +40,23 @@ void Voice::prepare (double sr)
     pendingNote = -1;
 }
 
-void Voice::noteOn (int midiNote, float vel, const SynthParams& p, uint32_t ageStamp)
+void Voice::noteOn (int midiNote, float vel, const SynthParams& p,
+                    uint32_t ageStamp, const float* globalLfoPhase)
 {
+    pendingNote = midiNote;
+    pendingVelocity = vel;
+    pendingAge = ageStamp;
+    for (int i = 0; i < 2; ++i)
+        pendingLfoPhase[i] = p.lfo[i].retrigger ? p.lfo[i].phase : globalLfoPhase[i];
+
     if (active && env1.getLevel() > 1.0e-3f)
     {
-        // Steal: fade the current note, then start the new one from render().
-        pendingNote = midiNote;
-        pendingVelocity = vel;
-        pendingAge = ageStamp;
+        // Steal: fade the current note out, then start the new one from render().
         env1.fastRelease (3.0f);
         env2.fastRelease (3.0f);
         return;
     }
 
-    pendingNote = midiNote;
-    pendingVelocity = vel;
-    pendingAge = ageStamp;
     startPending (p);
 }
 
@@ -58,6 +67,7 @@ void Voice::startPending (const SynthParams& p)
     age = pendingAge;
     pendingNote = -1;
     active = true;
+    randomValue = rng.nextFloat() * 2.0f - 1.0f;
 
     oscA.setTable (p.osc[0].table);
     oscB.setTable (p.osc[1].table);
@@ -66,20 +76,23 @@ void Voice::startPending (const SynthParams& p)
     sub.reset();
     filter.reset();
 
+    for (int i = 0; i < 2; ++i)
+        lfo[i].reset (pendingLfoPhase[i], (uint32_t) rng.nextInt() | 1u);
+
     env1.setParameters (p.env[0].attackMs, p.env[0].decayMs, p.env[0].sustain, p.env[0].releaseMs);
     env2.setParameters (p.env[1].attackMs, p.env[1].decayMs, p.env[1].sustain, p.env[1].releaseMs);
     env1.noteOn();
     env2.noteOn();
 
     controlCounter = 0;
-    updateControl (p);
+    updateControl (p, 0);
 }
 
 void Voice::noteOff()
 {
     if (pendingNote >= 0)
     {
-        // Note released before the steal fade finished: drop the pending note.
+        // Released before the steal fade finished: drop the pending note.
         pendingNote = -1;
         return;
     }
@@ -95,45 +108,82 @@ void Voice::kill()
     pendingNote = -1;
 }
 
-void Voice::updateControl (const SynthParams& p)
+void Voice::updateControl (const SynthParams& p, int numSamples)
 {
+    // --- LFOs first: they are modulation sources for everything below.
+    float lfoValue[2];
+    for (int i = 0; i < 2; ++i)
+    {
+        lfo[i].setRate (lfoRate (p.lfo[i], p.bpm));
+        float v = lfo[i].processControl (p.lfo[i].shape, numSamples);
+        if (p.lfo[i].unipolar)
+            v = v * 0.5f + 0.5f;
+        lfoValue[i] = v;
+    }
+
+    // --- Modulation matrix
+    float sources[ModSource::count] = {};
+    sources[ModSource::none]          = 0.0f;
+    sources[ModSource::env1]          = env1.getLevel();
+    sources[ModSource::env2]          = env2.getLevel();
+    sources[ModSource::lfo1]          = lfoValue[0];
+    sources[ModSource::lfo2]          = lfoValue[1];
+    sources[ModSource::velocity]      = velocity;
+    sources[ModSource::modWheel]      = modWheel;
+    sources[ModSource::aftertouch]    = aftertouch;
+    sources[ModSource::keyTrack]      = ((float) note - 60.0f) / 48.0f;
+    sources[ModSource::randomPerNote] = randomValue;
+
+    float mod[ModDest::count];
+    accumulateModulation (p.modSlots, sources, mod);
+
     const float bentNote = (float) note + pitchBend;
 
-    // --- oscillators
+    // --- Oscillators
     for (int i = 0; i < 2; ++i)
     {
         const auto& o = p.osc[i];
         auto& osc = i == 0 ? oscA : oscB;
-        const float n = bentNote + (float) (o.octave * 12 + o.semitone) + o.fineCents * 0.01f;
+        const float pitchMod  = mod[i == 0 ? ModDest::oscAPitch  : ModDest::oscBPitch];
+        const float wtMod     = mod[i == 0 ? ModDest::oscAWtPos  : ModDest::oscBWtPos];
+        const float detuneMod = mod[i == 0 ? ModDest::oscADetune : ModDest::oscBDetune];
+
+        const float n = bentNote + (float) (o.octave * 12 + o.semitone) + o.fineCents * 0.01f + pitchMod;
         osc.setTable (o.table);
-        osc.update (noteToHz (n), o.wtPosition, o.unisonDetune, o.unisonWidth, o.unisonBlend);
+        osc.update (noteToHz (n),
+                    juce::jlimit (0.0f, 1.0f, o.wtPosition + wtMod),
+                    juce::jmax (0.0f, o.unisonDetune + detuneMod),
+                    o.unisonWidth, o.unisonBlend);
     }
-    gainA = p.osc[0].enabled ? p.osc[0].level : 0.0f;
-    gainB = p.osc[1].enabled ? p.osc[1].level : 0.0f;
-    panGains (p.osc[0].pan, panAL, panAR);
-    panGains (p.osc[1].pan, panBL, panBR);
+    gainA = p.osc[0].enabled ? juce::jlimit (0.0f, 2.0f, p.osc[0].level + mod[ModDest::oscALevel]) : 0.0f;
+    gainB = p.osc[1].enabled ? juce::jlimit (0.0f, 2.0f, p.osc[1].level + mod[ModDest::oscBLevel]) : 0.0f;
+    panGains (p.osc[0].pan + mod[ModDest::oscAPan], panAL, panAR);
+    panGains (p.osc[1].pan + mod[ModDest::oscBPan], panBL, panBR);
 
-    // --- sub / noise
+    // --- Sub / noise
     sub.update (noteToHz (bentNote + (float) (p.sub.octave * 12)), p.sub.shape);
-    gainSub = p.sub.enabled ? p.sub.level : 0.0f;
+    gainSub   = p.sub.enabled   ? juce::jlimit (0.0f, 2.0f, p.sub.level   + mod[ModDest::subLevel])   : 0.0f;
     noise.setType (p.noise.type);
-    gainNoise = p.noise.enabled ? p.noise.level : 0.0f;
+    gainNoise = p.noise.enabled ? juce::jlimit (0.0f, 2.0f, p.noise.level + mod[ModDest::noiseLevel]) : 0.0f;
 
-    // --- filter: cutoff * keytrack * env2
+    // --- Filter: cutoff moved by key tracking, the Env2 amount knob and the matrix
     filterOn = p.filter.enabled;
     routeA = p.filter.routeA; routeB = p.filter.routeB;
     routeSub = p.filter.routeSub && ! p.sub.direct; routeNoise = p.filter.routeNoise;
     if (filterOn)
     {
         const float semis = p.filter.keyTrack * ((float) note - 60.0f)
-                          + p.filter.env2Amount * env2.getLevel();
+                          + p.filter.env2Amount * env2.getLevel()
+                          + mod[ModDest::filterCutoff];
         const float cutoff = p.filter.cutoffHz * std::exp2 (semis / 12.0f);
-        filter.update (p.filter.type, cutoff, p.filter.resonance, p.filter.drive);
+        filter.update (p.filter.type, cutoff,
+                       juce::jlimit (0.0f, 1.0f, p.filter.resonance + mod[ModDest::filterResonance]),
+                       juce::jlimit (1.0f, 10.0f, p.filter.drive + mod[ModDest::filterDrive]));
     }
 
-    // Velocity -> amplitude (perceptual curve), with 6 dB of headroom so a
-    // few unison-stacked notes stay below 0 dBFS before the master gain.
-    ampVel = 0.5f * (0.2f + 0.8f * velocity * velocity);
+    // --- Amp: velocity curve, 6 dB of headroom, then the matrix (tremolo etc.)
+    const float vel = 0.5f * (0.2f + 0.8f * velocity * velocity);
+    ampGain = vel * juce::jlimit (0.0f, 1.0f, 1.0f + mod[ModDest::ampLevel]);
 }
 
 void Voice::render (juce::AudioBuffer<float>& out, int start, int num, const SynthParams& p)
@@ -147,11 +197,11 @@ void Voice::render (juce::AudioBuffer<float>& out, int start, int num, const Syn
     for (int i = 0; i < num; ++i)
     {
         if (controlCounter == 0)
-            updateControl (p);
+            updateControl (p, controlInterval);
         if (++controlCounter >= controlInterval)
             controlCounter = 0;
 
-        const float amp = env1.process() * ampVel;
+        const float amp = env1.process() * ampGain;
         env2.process();
 
         if (! env1.isActive())

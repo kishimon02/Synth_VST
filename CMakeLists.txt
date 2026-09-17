@@ -71,6 +71,7 @@ target_sources(WaveForge PRIVATE
     src/PluginProcessor.cpp
     src/PluginEditor.cpp
     src/Params.cpp
+    src/PresetManager.cpp
     ${WAVEFORGE_DSP_SOURCES}
 )
 
@@ -124,6 +125,8 @@ set_target_properties(WaveForgeTests PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 target_sources(WaveForgeTests PRIVATE
     tests/WavetableTests.cpp
+    src/Params.cpp
+    src/PresetManager.cpp
     ${WAVEFORGE_DSP_SOURCES}
 )
 target_include_directories(WaveForgeTests PRIVATE src)
@@ -136,6 +139,7 @@ target_compile_definitions(WaveForgeTests PRIVATE
 target_link_libraries(WaveForgeTests
     PRIVATE
         juce::juce_audio_formats
+        juce::juce_audio_processors
         juce::juce_dsp
     PUBLIC
         juce::juce_recommended_config_flags

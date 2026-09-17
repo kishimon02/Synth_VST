@@ -10,6 +10,24 @@ WaveForgeEditor::WaveForgeEditor (WaveForgeProcessor& p)
     title.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (title);
 
+    presetLabel.setJustificationType (juce::Justification::centredRight);
+    addAndMakeVisible (presetLabel);
+
+    presetBox.setTextWhenNothingSelected ("(custom)");
+    presetBox.onChange = [this]
+    {
+        const auto name = presetBox.getText();
+        if (name.isNotEmpty() && name != processor.getCurrentPresetName())
+            processor.applyFactoryPreset (name);
+    };
+    addAndMakeVisible (presetBox);
+
+    savePresetButton.onClick = [this] { savePresetAs(); };
+    loadPresetButton.onClick = [this] { loadPresetFile(); };
+    addAndMakeVisible (savePresetButton);
+    addAndMakeVisible (loadPresetButton);
+    refreshPresetMenu();
+
     for (int i = 0; i < 2; ++i)
     {
         auto& row = oscRows[i];
@@ -55,6 +73,71 @@ WaveForgeEditor::~WaveForgeEditor()
 void WaveForgeEditor::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     refreshTableCombos();
+    refreshPresetMenu();
+}
+
+void WaveForgeEditor::refreshPresetMenu()
+{
+    presetBox.clear (juce::dontSendNotification);
+    int id = 1;
+    presetBox.addSectionHeading ("Factory");
+    for (const auto& p : PresetManager::factoryPresets())
+        presetBox.addItem (p.name, id++);
+
+    const auto current = processor.getCurrentPresetName();
+    for (int i = 0; i < presetBox.getNumItems(); ++i)
+        if (presetBox.getItemText (i) == current)
+        {
+            presetBox.setSelectedId (presetBox.getItemId (i), juce::dontSendNotification);
+            return;
+        }
+    presetBox.setText (current, juce::dontSendNotification);
+}
+
+void WaveForgeEditor::savePresetAs()
+{
+    const auto dir = PresetManager::presetDirectory();
+    dir.createDirectory();
+    fileChooser = std::make_unique<juce::FileChooser> ("Save preset",
+                                                       dir.getChildFile (processor.getCurrentPresetName()
+                                                                         + PresetManager::fileExtension),
+                                                       juce::String ("*") + PresetManager::fileExtension);
+    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                                  | juce::FileBrowserComponent::warnAboutOverwriting,
+                              [this] (const juce::FileChooser& fc)
+                              {
+                                  auto file = fc.getResult();
+                                  if (file == juce::File())
+                                      return;
+                                  if (file.getFileExtension().isEmpty())
+                                      file = file.withFileExtension (PresetManager::fileExtension);
+
+                                  juce::String error;
+                                  if (! processor.savePresetToFile (file, error))
+                                      juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                                              "Save preset", error);
+                                  else
+                                      refreshPresetMenu();
+                              });
+}
+
+void WaveForgeEditor::loadPresetFile()
+{
+    const auto dir = PresetManager::presetDirectory();
+    dir.createDirectory();
+    fileChooser = std::make_unique<juce::FileChooser> ("Load preset", dir,
+                                                       juce::String ("*") + PresetManager::fileExtension);
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [this] (const juce::FileChooser& fc)
+                              {
+                                  const auto file = fc.getResult();
+                                  if (! file.existsAsFile())
+                                      return;
+                                  juce::String error;
+                                  if (! processor.loadPresetFromFile (file, error))
+                                      juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                                              "Load preset", error);
+                              });
 }
 
 void WaveForgeEditor::refreshTableCombos()
@@ -98,8 +181,9 @@ void WaveForgeEditor::timerCallback()
         if (auto* pos = apvts.getRawParameterValue (ParamID::osc (i).wtPos))
             oscRows[i].view.setPosition (pos->load());
     }
-    title.setText ("WaveForge  -  Phase 1 (wavetable engine)   voices: "
-                       + juce::String (processor.getActiveVoiceCount()),
+    title.setText ("WaveForge  -  Phase 2 (LFO + mod matrix)    voices: "
+                       + juce::String (processor.getActiveVoiceCount())
+                       + "    " + juce::String (processor.getHostBpm(), 1) + " BPM",
                    juce::dontSendNotification);
 }
 
@@ -111,7 +195,16 @@ void WaveForgeEditor::paint (juce::Graphics& g)
 void WaveForgeEditor::resized()
 {
     auto area = getLocalBounds().reduced (10);
-    title.setBounds (area.removeFromTop (28));
+
+    auto top = area.removeFromTop (28);
+    auto presetArea = top.removeFromRight (juce::jmin (440, top.getWidth() / 2));
+    loadPresetButton.setBounds (presetArea.removeFromRight (80).reduced (2, 0));
+    savePresetButton.setBounds (presetArea.removeFromRight (90).reduced (2, 0));
+    presetLabel.setBounds (presetArea.removeFromLeft (55));
+    presetBox.setBounds (presetArea.reduced (2, 0));
+    title.setBounds (top);
+
+    area.removeFromTop (6);
     keyboard.setBounds (area.removeFromBottom (80));
     area.removeFromBottom (8);
 

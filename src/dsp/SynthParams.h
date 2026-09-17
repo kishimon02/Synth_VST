@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Wavetable.h"
+#include "ModMatrix.h"
 
 namespace wf
 {
@@ -61,6 +62,17 @@ struct EnvParams
     float attackMs = 5.0f, decayMs = 200.0f, sustain = 0.8f, releaseMs = 150.0f;
 };
 
+struct LfoParams
+{
+    int   shape = 0;           // Lfo::Shape
+    bool  tempoSync = false;
+    float rateHz = 2.0f;       // used when tempoSync is false
+    int   syncDivision = 5;    // Lfo::divisionBeats index (default 1/4)
+    bool  retrigger = true;    // false = free-running (phase locked across voices)
+    float phase = 0.0f;        // start phase in retrigger mode
+    bool  unipolar = false;    // true maps the output to 0..1
+};
+
 struct GlobalParams
 {
     float masterGain = 0.5f;   // linear
@@ -70,12 +82,16 @@ struct GlobalParams
 
 struct SynthParams
 {
-    OscParams    osc[2];
-    SubParams    sub;
-    NoiseParams  noise;
-    FilterParams filter;
-    EnvParams    env[2];       // 0 = amp, 1 = mod
-    GlobalParams global;
+    OscParams     osc[2];
+    SubParams     sub;
+    NoiseParams   noise;
+    FilterParams  filter;
+    EnvParams     env[2];      // 0 = amp, 1 = mod
+    LfoParams     lfo[2];
+    ModSlotParams modSlots[numModSlots];
+    GlobalParams  global;
+
+    float bpm = 120.0f;        // from the host playhead, for tempo-synced LFOs
 };
 
 } // namespace wf

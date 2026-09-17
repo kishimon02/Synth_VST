@@ -6,6 +6,7 @@
 #include "Params.h"
 #include "ParamRefs.h"
 #include "WavetableBank.h"
+#include "PresetManager.h"
 #include "Diagnostics.h"
 #include "dsp/SynthEngine.h"
 
@@ -52,10 +53,19 @@ public:
     bool loadWavetableFile (int osc, const juce::File& file, juce::String& error);
 
     int getActiveVoiceCount() const noexcept { return activeVoices.load (std::memory_order_relaxed); }
+    float getHostBpm() const noexcept { return hostBpm.load (std::memory_order_relaxed); }
+
+    // Presets (message thread only)
+    void applyFactoryPreset (const juce::String& name);
+    bool savePresetToFile (const juce::File& file, juce::String& error);
+    bool loadPresetFromFile (const juce::File& file, juce::String& error);
+    const juce::String& getCurrentPresetName() const noexcept { return currentPresetName; }
 
 private:
     void timerCallback() override;
     void setOscTableBySourceId (int osc, const juce::String& sourceId);
+    juce::ValueTree buildStateTree();
+    void applyStateTree (const juce::ValueTree& state);
 
     juce::AudioProcessorValueTreeState apvts;
     juce::MidiKeyboardState keyboardState;
@@ -66,6 +76,8 @@ private:
     std::atomic<const wf::Wavetable*> oscTable[2] { nullptr, nullptr };
     int oscTableIndex[2] { 0, 0 };
     std::atomic<int> activeVoices { 0 };
+    std::atomic<float> hostBpm { 120.0f };
+    juce::String currentPresetName { "Init" };
 
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> masterGain { 0.5f };
     double currentSampleRate = 44100.0;

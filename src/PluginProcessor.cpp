@@ -89,8 +89,16 @@ void WaveForgeProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     // Merge on-screen keyboard events with host MIDI (and light up host notes).
     keyboardState.processNextMidiBuffer (midi, 0, numSamples, true);
 
+    // Tempo for synced LFOs. Standalone has no playhead, so the last known
+    // value (default 120) is kept.
+    if (auto* ph = getPlayHead())
+        if (const auto pos = ph->getPosition())
+            if (const auto bpm = pos->getBpm())
+                hostBpm.store ((float) *bpm, std::memory_order_relaxed);
+
     const auto params = refs.snapshot (oscTable[0].load (std::memory_order_acquire),
-                                       oscTable[1].load (std::memory_order_acquire));
+                                       oscTable[1].load (std::memory_order_acquire),
+                                       hostBpm.load (std::memory_order_relaxed));
     engine.process (buffer, midi, params);
     activeVoices.store (engine.getActiveVoiceCount(), std::memory_order_relaxed);
 
@@ -106,27 +114,78 @@ juce::AudioProcessorEditor* WaveForgeProcessor::createEditor()
     return new WaveForgeEditor (*this);
 }
 
-void WaveForgeProcessor::getStateInformation (juce::MemoryBlock& destData)
+juce::ValueTree WaveForgeProcessor::buildStateTree()
 {
     auto state = apvts.copyState();
     for (int i = 0; i < 2; ++i)
         state.setProperty (ParamID::oscTableProperty (i), bank.sourceIdAt (oscTableIndex[i]), nullptr);
-    if (auto xml = state.createXml())
+    state.setProperty ("preset_name", currentPresetName, nullptr);
+    return state;
+}
+
+void WaveForgeProcessor::applyStateTree (const juce::ValueTree& state)
+{
+    apvts.replaceState (state);
+    for (int i = 0; i < 2; ++i)
+        setOscTableBySourceId (i, state.getProperty (ParamID::oscTableProperty (i)).toString());
+
+    const auto name = state.getProperty ("preset_name").toString();
+    currentPresetName = name.isNotEmpty() ? name : juce::String ("Init");
+    sendChangeMessage();
+}
+
+void WaveForgeProcessor::getStateInformation (juce::MemoryBlock& destData)
+{
+    if (auto xml = buildStateTree().createXml())
         copyXmlToBinary (*xml, destData);
 }
 
 void WaveForgeProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
-    {
         if (xml->hasTagName (apvts.state.getType()))
-        {
-            const auto state = juce::ValueTree::fromXml (*xml);
-            apvts.replaceState (state);
-            for (int i = 0; i < 2; ++i)
-                setOscTableBySourceId (i, state.getProperty (ParamID::oscTableProperty (i)).toString());
-        }
+            applyStateTree (juce::ValueTree::fromXml (*xml));
+}
+
+//==============================================================================
+void WaveForgeProcessor::applyFactoryPreset (const juce::String& name)
+{
+    const auto* preset = PresetManager::findFactory (name);
+    if (preset == nullptr)
+        return;
+
+    PresetManager::applyFactory (apvts, *preset);
+    setOscTableBySourceId (0, preset->tableA);
+    setOscTableBySourceId (1, preset->tableB);
+    currentPresetName = name;
+    sendChangeMessage();
+}
+
+bool WaveForgeProcessor::savePresetToFile (const juce::File& file, juce::String& error)
+{
+    currentPresetName = file.getFileNameWithoutExtension();
+    if (! PresetManager::saveToFile (buildStateTree(), file, error))
+        return false;
+    sendChangeMessage();
+    return true;
+}
+
+bool WaveForgeProcessor::loadPresetFromFile (const juce::File& file, juce::String& error)
+{
+    juce::ValueTree state;
+    if (! PresetManager::loadFromFile (file, state, error))
+        return false;
+
+    if (! state.hasType (apvts.state.getType()))
+    {
+        error = "That file is not a WaveForge preset.";
+        return false;
     }
+
+    applyStateTree (state);
+    currentPresetName = file.getFileNameWithoutExtension();
+    sendChangeMessage();
+    return true;
 }
 
 //==============================================================================
